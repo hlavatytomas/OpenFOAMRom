@@ -5,6 +5,8 @@ import os
 import matplotlib.pyplot as plt
 import pickle
 from math import floor
+import vtk
+from multiprocessing import Pool
 # import pyrennModV3 as prn
 
 # -- custom function
@@ -13,7 +15,7 @@ from myAddFcs import *
 
 # class to store openfoam data in python and perform ROM stuff (POD, ROM)
 class OpenFoamData:
-    def __init__(self, caseDir, startTime, endTime, storage, procFields, outDir):
+    def __init__(self, caseDir, startTime, endTime, storage, procFields, outDir,parallel=False):
         self.caseDir = caseDir                                         # where the case folder is stored
         self.startTime = startTime                                     # start time of the interest
         self.endTime = endTime                                         # end time of the interest
@@ -30,6 +32,7 @@ class OpenFoamData:
         self.randmodes = []                                                # python list with calculated modes
         self.randchronos = []                                              # saved chronoses
         self.randsingVals = []                                             # singular values of the PO decomposition
+        self.parallel = parallel
         print('I am creating %s OpenFOAM fields in Python in %s, in time interval from %g to %g, looking into %s.'%(str(self.procFields),self.caseDir,self.startTime,self.endTime,self.storage)) 
         # --- create out directory
         if not os.path.exists('%s/'%(self.outDir)):             
@@ -52,7 +55,27 @@ class OpenFoamData:
             self.timeLstStr = sorted(np.array(timeLst).astype(str))
         elif self.storage == 'VTK':
             dirLst = os.listdir('%s/VTK/'%(self.caseDir))
-        print('I have found %d times: %s'%(len(self.timeLst),str(self.timeLst)))
+        elif self.storage == 'VTK-parallel':
+            self.proc0 = '%s/processor0' % self.caseDir
+            dirLst = os.listdir('%s/VTK/'%(self.proc0))
+            self.vtkLst = sorted([vtk for vtk in dirLst if os.path.isfile('%s/VTK/%s'%(self.proc0,vtk))])
+            print(self.vtkLst)
+            # reader = vtk.vtkGenericDataObjectReader()
+            # reader.SetFileName('%s/VTK/%s'%(self.proc0,dirLst[0]))
+            # reader.Update()
+            #     # Get vtkPolyData object from reader
+            # polydata = reader.GetOutput()
+
+            # # Convert point data to cell data using vtkPointDataToCellData
+            # p2c = vtk.vtkPointDataToCellData()
+            # p2c.SetInputConnection(reader.GetOutputPort())
+            # p2c.Update()
+            # polydata = reader.GetOutput()
+        
+            # for field in self.procFields:
+            # pressure = p2c.GetOutput().GetCellData().GetArray("p")
+            # U = p2c.GetOutput().GetCellData().GetArray("U")
+        # print('I have found %d times: %s'%(len(self.timeLst),str(self.timeLst)))
 
     # --- function to load openfoam data for given fields into numpy arrays
     def loadYsFromOFData(self,plochaName = "plochaHor.vtk",mkDel = [],onlyXY=False):
@@ -297,13 +320,110 @@ class OpenFoamData:
                 file.writelines( data )
             return data
 
+    # -- function to read field from vtk
+    def loadNumpyFromVtk(self,vtkName):
+        reader = vtk.vtkGenericDataObjectReader()
+        reader.SetFileName(vtkName)
+        reader.Update()
+
+        # Get vtkPolyData object from reader
+        polydata = reader.GetOutput()
+
+        # Get cell data array from p2c
+        fields = []
+        for fieldI in range(len(self.procFields)):
+            fields.append(np.array(polydata.GetCellData().GetArray(self.procFields[fieldI])))
+        
+        return fields
+    
+    # -- function to write vtk from numpy fields
+    # -- name -- name of the file, fields -- numpy fields to write, template -- template vtk, dest -- directory to store
+    def writeVtkFromNumpy(self,name,fields,template,dest):
+        reader = vtk.vtkGenericDataObjectReader()
+        reader.SetFileName(template)
+        reader.Update()
+
+        if not os.path.exists(dest):
+            os.mkdir(dest)
+
+        data = reader.GetOutput()
+        
+        for fieldI in range(len(self.procFields)):
+            # Get the array you want to modify
+            array = data.GetCellData().GetArray(self.procFields[fieldI])
+
+            # Modify the array
+            if array.GetNumberOfComponents() == 1:
+                for i in range(array.GetNumberOfTuples()):
+                    # print(i,fields[fieldI].shape)
+                    array.SetValue(i, fields[fieldI][i])
+            else:
+                for i in range(array.GetNumberOfTuples()):
+                    array.SetTuple(i, fields[fieldI][i])
+                
+                # array.InsertTuple(i, fields[fieldI][i])
+
+        print('Writing file %s/%s' %(dest,name))
+        writer = vtk.vtkGenericDataObjectWriter()
+        writer.SetFileName('%s/%s'%(dest,name))
+        # writer.SetInputData(reader.GetOutput())
+        writer.SetInputData(data)
+        writer.Write()
+    
+    # -- function to reconstruct vtks together
+    # -- destName -- what to merge (must be in each processor)
+    def reconstructVTKs(self, destName,name='reconstructAVG.vtk',):
+        dirLst = os.listdir(self.caseDir)
+        procLst = sorted([proc for proc in dirLst if 'processor' in proc])
+        reader = vtk.vtkGenericDataObjectReader()
+        append = vtk.vtkAppendFilter()
+        for proc in procLst:
+            reader.SetFileName('%s/%s/%s'%(self.caseDir,proc,destName))
+            reader.Update()
+            polydata = vtk.vtkUnstructuredGrid()
+            polydata.ShallowCopy(reader.GetOutput())
+            append.AddInputData(polydata)
+        
+        append.Update()    
+
+        writer = vtk.vtkGenericDataObjectWriter()
+        writer.SetFileName('%s/%s'%(self.outDir,name))
+        writer.SetInputData(append.GetOutput())
+        writer.Write()
 
     # --- function to calculate field average
-    def calcAvgY(self):
-        for i in range(len(self.Ys)):
-            UBox = np.copy(self.Ys[i])
-            UBoxAvg= np.average(UBox,axis=1)
-            self.avgs.append(UBoxAvg)
+    def calcAvgY(self, avgName = 'avgs'):
+        if self.storage == 'case' or self.storage == 'PPS' or self.storage == 'VTK':
+            for i in range(len(self.Ys)):
+                UBox = np.copy(self.Ys[i])
+                UBoxAvg= np.average(UBox,axis=1)
+                self.avgs.append(UBoxAvg)
+        elif self.storage == 'VTK-parallel':
+            dirLst = os.listdir(self.caseDir)
+            procLst = sorted([proc for proc in dirLst if 'processor' in proc])
+            procNums = [int(proc.split('processor')[1]) for proc in procLst]
+            if not self.parallel:
+                for procNum in procNums:
+                    self.avgOnProc(procNum,avgName=avgName)
+    
+    # -- function to average on processor
+    def avgOnProc(self, procNum, avgName = 'avgs'):
+        print('Averiging fields from processor %d'%procNum)
+        proc = 'processor%d'%procNum
+        vtkNazevTu = self.vtkLst[0].replace('0_','%d_'%procNum)
+        avgs = self.loadNumpyFromVtk('%s/%s/VTK/%s'%(self.caseDir,proc,vtkNazevTu))
+        nTimes = 0
+        for vtkI in range(len(self.vtkLst)-1):
+            vtkNazevTu = self.vtkLst[vtkI].replace('0_','%d_'%procNum)
+            print('Adding file %s' %vtkNazevTu)
+            add = self.loadNumpyFromVtk('%s/%s/VTK/%s'%(self.caseDir,proc,vtkNazevTu))
+            for fieldI in range(len(self.procFields)):
+                avgs[fieldI] += add[fieldI]
+            nTimes += 1
+        for fieldI in range(len(self.procFields)):
+            avgs[fieldI] = avgs[fieldI] / nTimes
+        self.writeVtkFromNumpy('avg.vtk', avgs, '%s/%s/VTK/%s'%(self.caseDir,proc,vtkNazevTu), '%s/%s/%s/'%(self.caseDir,proc,avgName))
+
 
     # --- function to run PO decomposition
     def POD(self, singValsFile = ''):

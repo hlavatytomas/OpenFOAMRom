@@ -10,7 +10,9 @@ import os
 
 caseOutFolder = '../'
 numpyOutDir = '%s/ZZ_testNumpy' % caseOutFolder
-fieldsOfInt = ['U', 'p']
+fieldsOfInt = ['p','U']
+# fieldsOfInt = ['p']
+parallel = False
 #fieldsOfInt = ['U']
 
 #testCase = OpenFOAMCase()
@@ -41,25 +43,27 @@ fieldsOfInt = ['U', 'p']
 #)
 
 #oFData = OpenFoamData(caseOutFolder, 0.1, 0.2,'case', fieldsOfInt, (numpyOutDir))
-oFData = OpenFoamData(caseOutFolder, 0.15, 0.2,'case', fieldsOfInt, (numpyOutDir))
+oFData = OpenFoamData(caseOutFolder, 0.15, 0.2,'VTK-parallel', fieldsOfInt, (numpyOutDir),parallel=parallel)
 oFData.loadTimeLst()
-oFData.loadYsFromOFData()
-oFData.saveYsFromNPField()
+
+# oFData.loadYsFromOFData()
+# oFData.saveYsFromNPField()
 
 # oFData.loadYsFromNPField()
 
-oFData.calcAvgY()
+oFData.calcAvgY(avgName='avgsTest')
+oFData.reconstructVTKs(destName='avgsTest/avg.vtk')
 
-oFData.POD(singValsFile='%s/singVals'%(numpyOutDir))
+# oFData.POD(singValsFile='%s/singVals'%(numpyOutDir))
 
-for i in range(30):
-    oFData.writeField(oFData.modes[0][:,i],fieldsOfInt[0],'Topos%d_%s'%(i+1,fieldsOfInt[0]),caseOutFolder,outDir='%s/1000/' % (caseOutFolder))
+# for i in range(30):
+#     oFData.writeField(oFData.modes[0][:,i],fieldsOfInt[0],'Topos%d_%s'%(i+1,fieldsOfInt[0]),caseOutFolder,outDir='%s/1000/' % (caseOutFolder))
 
-for i in range(len(fieldsOfInt)):
-    oFData.writeField(
-        oFData.avgs[i],
-        fieldsOfInt[i],
-        'avg_%s'%(fieldsOfInt[i]),
-        caseOutFolder,
-        outDir='%s/1000/' % (caseOutFolder)
-    )
+# for i in range(len(fieldsOfInt)):
+#     oFData.writeField(
+#         oFData.avgs[i],
+#         fieldsOfInt[i],
+#         'avg_%s'%(fieldsOfInt[i]),
+#         caseOutFolder,
+#         outDir='%s/1000/' % (caseOutFolder)
+#     )

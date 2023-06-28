@@ -58,7 +58,8 @@ class OpenFoamData:
         elif self.storage == 'VTK-parallel':
             self.proc0 = '%s/processor0' % self.caseDir
             dirLst = os.listdir('%s/VTK/'%(self.proc0))
-            self.vtkLst = sorted([vtk for vtk in dirLst if os.path.isfile('%s/VTK/%s'%(self.proc0,vtk))])
+            vtkLst = sorted([vtk for vtk in dirLst if os.path.isfile('%s/VTK/%s'%(self.proc0,vtk))])
+            self.vtkLst = [vtk for vtk in vtkLst if float(vtk.split('_')[1].replace('.vtk','')) <= self.endTime and float(vtk.split('_')[1].replace('.vtk','')) >= self.startTime]
             print(self.vtkLst)
             # reader = vtk.vtkGenericDataObjectReader()
             # reader.SetFileName('%s/VTK/%s'%(self.proc0,dirLst[0]))
@@ -405,6 +406,9 @@ class OpenFoamData:
             if not self.parallel:
                 for procNum in procNums:
                     self.avgOnProc(procNum,avgName=avgName)
+            else:
+                with Pool(len(procNums)) as p:
+                    p.map(self.avgOnProc, procNums)
     
     # -- function to average on processor
     def avgOnProc(self, procNum, avgName = 'avgs'):

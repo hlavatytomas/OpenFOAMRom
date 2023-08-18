@@ -38,55 +38,69 @@ class OpenFoamData:
         if not os.path.exists('%s/'%(self.outDir)):             
             os.makedirs('%s/'%(self.outDir))
     
-    # --- functions to load openfoam timeLst from different sources ('case','PPS'--postProcessing/sample,'VTK'-- 3D VTK storage)
-    def loadTimeLst(self):
-        # -- NOTE: at the time only 'case' option works, the other not tested
-        if self.storage == 'case':
-            dirLst = os.listdir(self.caseDir)
-            timeLst = [dir for dir in dirLst if isFloat(dir) and float(dir) >= self.startTime and float(dir) <= self.endTime ]
-            timeLst = [time for time in timeLst if os.path.exists('%s/%s/%s'%(self.caseDir,time,"U"))] 
-            timeLst = np.array(timeLst).astype(float)
-            self.timeLst = sorted(timeLst)
-        elif self.storage == 'PPS':
-            dirLst = os.listdir('%s/postProcessing/sample/'%(self.caseDir))
-            timeLst = [dir for dir in dirLst if isFloat(dir) and float(dir) >= self.startTime and float(dir) <= self.endTime]
-            timeLstfl = np.array(timeLst).astype(float)
-            self.timeLst = sorted(timeLstfl)
-            self.timeLstStr = sorted(np.array(timeLst).astype(str))
-        elif self.storage == 'VTK':
-            dirLst = os.listdir('%s/VTK/'%(self.caseDir))
-        elif self.storage == 'VTK-parallel':
-            self.proc0 = '%s/processor0' % self.caseDir
-            dirLst = os.listdir('%s/VTK/'%(self.proc0))
-            vtkLst = sorted([vtk for vtk in dirLst if os.path.isfile('%s/VTK/%s'%(self.proc0,vtk))])
-            self.vtkLst = [vtk for vtk in vtkLst if float(vtk.split('_')[1].replace('.vtk','')) <= self.endTime and float(vtk.split('_')[1].replace('.vtk','')) >= self.startTime]
-            print(self.vtkLst)
-            # reader = vtk.vtkGenericDataObjectReader()
-            # reader.SetFileName('%s/VTK/%s'%(self.proc0,dirLst[0]))
-            # reader.Update()
-            #     # Get vtkPolyData object from reader
-            # polydata = reader.GetOutput()
-
-            # # Convert point data to cell data using vtkPointDataToCellData
-            # p2c = vtk.vtkPointDataToCellData()
-            # p2c.SetInputConnection(reader.GetOutputPort())
-            # p2c.Update()
-            # polydata = reader.GetOutput()
-        
-            # for field in self.procFields:
-            # pressure = p2c.GetOutput().GetCellData().GetArray("p")
-            # U = p2c.GetOutput().GetCellData().GetArray("U")
-        # print('I have found %d times: %s'%(len(self.timeLst),str(self.timeLst)))
+    # -- function to load time and vtk list
+    def loadVTKandTimeLst(self):
+        fld = self.caseDir + '/postProcessing/sample/'
+        times = sorted([time for time in os.listdir(fld) if isFloat(time)])
+        times = [time for time in times if float(time) >= self.startTime and float(time) <= self.endTime]
+        vtkFiles = []
+        for time in times:
+            if os.path.isfile('%s/%s/%s_new.vtk'%(fld,time,plochaName.split('.')[0])):
+                vtkFiles.append('%s/%s/%s_new.vtk'%(fld,time,plochaName.split('.')[0]))
+            elif os.path.isfile('%s/%s/%s'%(fld,time,plochaName)):
+                vtkFiles.append('%s/%s/%s'%(fld,time,plochaName))
+        self.timeLst = times
+        self.vtkFiles = vtkFiles
 
     # --- function to load openfoam data for given fields into numpy arrays
     def loadYsFromOFData(self,plochaName = "plochaHor.vtk",mkDel = [],onlyXY=False):
-        for i in range(len(self.procFields)):
-            field = self.procFields[i]
-            if self.storage == 'case':
+        if self.storage == 'case':
+            for i in range(len(self.procFields)):
+                field = self.procFields[i]
                 self.loadFieldFilesCase(field)
-            elif self.storage == 'PPS':
-                self.loadFieldFilesPPS(field,plochaName,onlyXY=onlyXY)
+        elif self.storage == 'PPS':
+            # -- load all times
+            # fld = self.caseDir + '/postProcessing/sample/'
+            # times = sorted([time for time in os.listdir(fld) if isFloat(time)])
+            # times = [time for time in times if float(time) >= self.startTime and float(time) <= self.endTime]
+            # vtkFiles = []
+            # for time in times:
+            #     if os.path.isfile('%s/%s/%s_new.vtk'%(fld,time,plochaName.split('.')[0])):
+            #         vtkFiles.append('%s/%s/%s_new.vtk'%(fld,time,plochaName.split('.')[0]))
+            #     elif os.path.isfile('%s/%s/%s'%(fld,time,plochaName)):
+            #         vtkFiles.append('%s/%s/%s'%(fld,time,plochaName))
+            # self.timeLst = times
+            # self.vtkFiles = vtkFiles
+            self.loadVTKandTimeLst()
+            print('Loaded %d vtkFiles from time %s to time %s' % (len(self.vtkFiles), times[0], times[-1]))
 
+            ref = self.loadNumpyFromVtk(self.vtkFiles[0])[0]
+            # -- prepare Y_npy
+            
+            with open(self.vtkFiles[0], 'r') as file:
+                data = file.readlines()
+
+            # -- get the output dimensions
+            mkDelTu = mkDel[:]
+            self.lenVecsNCells.append(self.getVecLengthPPS(data))
+            nCells = self.lenVecsNCells[-1][1]
+            lenVec = self.lenVecsNCells[-1][0]
+
+            if onlyXY:
+                Y = np.empty((ref.shape[0]*2,0))
+            else:
+                Y = np.empty((ref.shape[0]*ref.shape[1],0))
+            for vtkFile in self.vtkFiles:
+                print('Working on %s' %vtkFile)
+                fldLst = self.loadNumpyFromVtk(vtkFile)
+                for fld in fldLst:
+                    if onlyXY:
+                        fld = fld[:,:2]
+                    Y = np.append(Y, np.reshape(fld, (-1,1)), axis=1)
+            self.Ys.append(Y)
+            if onlyXY:
+                self.mkDels.append(2)
+            
     # --- function to read oF file and to return the length of vector and number of cells -- case
     def getVecLengthCase(self,data):
         for i in range(len(data)):
@@ -289,7 +303,7 @@ class OpenFoamData:
         
             # -- replace location and object in out file
             if data == []:
-                with open('%s/postProcessing/sample/%g/%s_%s'%(self.caseDir,self.timeLst[0],templateFieldName,plochaName), 'r') as file:
+                with open(self.vtkFiles[0], 'r') as file:
                     data = file.readlines()
             
             print('I am writing field %s with %d cells and %d length of vector.'%(fieldName,nCells,lenVec))
@@ -336,6 +350,11 @@ class OpenFoamData:
             fields.append(np.array(polydata.GetCellData().GetArray(self.procFields[fieldI])))
         
         return fields
+
+    # -- function to run symmetric and anytisymetric POD
+    def symmetricAntiSymmericPOD(self, UBox):
+        print(UBox.shape)
+        print(self.loadNumpyFromVtk(self.vtkFiles[0]))
     
     # -- function to write vtk from numpy fields
     # -- name -- name of the file, fields -- numpy fields to write, template -- template vtk, dest -- directory to store

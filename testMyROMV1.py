@@ -4,52 +4,53 @@ import matplotlib.pyplot as plt
 import os
 from scipy import signal
 
-# testedCases = ['40','50','75']
-testedCases = ['./meshInSt/mS_40p','./meshInSt/mS_50p','./meshInSt/mS_75p','./meshInSt/mS_120p'] #,'./bCyl_l_3']
-# testedCases = ['./meshInSt/mS_40p','./meshInSt/mS_50p','./meshInSt/mS_75p','./meshInSt/mS_120p','./bCyl_l_3']
+# -- information about case
+# testedCases = ['./meshInSt/mS_40p','./meshInSt/mS_50p','./meshInSt/mS_75p','./meshInSt/mS_120p']
 testedCases = ['../bCyl_l_3V3']
-
-
-
-timeSamples = np.linspace(1000,9000,9).astype(int)
-timeSamples = [500]
-# timeSamples = [7000]
-takePODmatricesFromFiles = False
-# takePODmatricesFromFiles = True
-loadFromNumpyFile = False
-loadFromNumpyFile = True
-modesToComp = 8
+timeSamples = np.linspace(3000,9000,3).astype(int)
+# timeSamples = [500]
 startTime = 0.9
 endTime = 1.9
 endTime = 6
 storage = 'PPS'
 procFields = ['U']
+plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0]]
+nameOfTheResultsFolder = 'flowAnalysisPy'
+
+# -- what to do?
+# takePODmatricesFromFiles = True
+takePODmatricesFromFiles = False
+loadFromNumpyFile = True
+# loadFromNumpyFile = False
 onlyXY = True
 # onlyXY = False
-plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0]]
-# plochaNazevLst = ["%s_plochaVer.vtk" % procFields[0]]
-# plochaNazevLst = ["%s_plochaHor3_filtered.vtk" % procFields[0]]
-# timeSamples = [500]
-# testedCases = ['./bCyl_l_3V2']
-# testedCases = ['75']
-
-# -- convolution of fluctulation
 withConv = True
-withConv = False
-shedFreq = 69
-kernLeng = int((1/69) / 0.0005)
-
-# -- symmetric and antisymmetric fluctulations
+# withConv = False
 symFluc = True
+# symFluc = False
+indFromFile = True
+# indFromFile = False
 
+# -- writing stuff 
+nModes = 60
+
+# -- how many modes compare in convergence
+modesToComp = 8
+
+
+############################################################################################################
+# -------------------------   script    --------------------------------------------------------------------
+############################################################################################################
+
+# -- folder with results
 newRes = '230817_res_conv%s_symFluc_%s'%(withConv, symFluc)
+nameOfTheResultsFolder = '%s_onlyXY_%s'%(nameOfTheResultsFolder, onlyXY)
 
+# -- in all testCases
 for case in testedCases:
     caseDir = case
     for plochaNazev in plochaNazevLst:
-        outDir = '%s/avgsPODResFrom_%s_time%g_%g_%s'%(caseDir,plochaNazev.split('.')[0], startTime, endTime,storage)
-        if onlyXY:
-            outDir = '%s/XYonly_avgsPODResFrom_%s_time_%g_%g_%s'%(caseDir,plochaNazev.split('.')[0], startTime, endTime,storage)
+        outDir = '%s/%s_%s_time%g_%g_%s'%(caseDir,nameOfTheResultsFolder,plochaNazev.split('.')[0], startTime, endTime,storage)
         
         # -- load openFoam data
         oFData = OpenFoamData(caseDir, startTime, endTime, storage, procFields, outDir)
@@ -63,77 +64,35 @@ for case in testedCases:
         
         # -- calculate average of the data
         oFData.calcAvgY()
-
-        # # -- write data
-        # prepWrite = np.append(oFData.avgs[0].reshape(-1,2), np.zeros((oFData.avgs[0].shape[0]//2,1)), axis =1)
-        # oFData.writeVtkFromNumpy('U_avg.vtk', [prepWrite], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/avgs/'%oFData.outDir)
-
         
-        # -- POD
-        # oFData.POD(singValsFile='%s/singVals'%(outDir))
-        # print(oFData.modes.shape)
-        # oFData.vizSpectraPts(svFig='Spectra_sum/spct_ptsV')
+        # -- whole snapshot matrix
         UBox = np.copy(oFData.Ys[0])
+        
+        # -- initialization of the error field for graph
         errorInAvg = np.zeros(len(timeSamples))
+        
+        # -- working for each time sample separatelly
         for i in range(len(timeSamples)):
             timeSample = timeSamples[i]
-            # averageMatrices in this time
+            
+            # -- calculate average matrices in this time
             UBoxTu = np.copy(UBox[:,:timeSample])
             UBoxTuAvg = np.copy(np.average(UBoxTu,axis=1))
             errorInAvg[i] = np.linalg.norm(UBoxTuAvg-oFData.avgs[0])
+            
+            # -- write avg field into vtk:
+            if onlyXY:
+                prepWrite = np.append(UBoxTuAvg[:].reshape(-1,2), np.zeros((UBoxTuAvg[:].shape[0]//2,1)), axis =1)
+            else:
+                prepWrite = UBoxTuAvg[:].reshape(-1,3)
+            oFData.writeVtkFromNumpy('avg.vtk', [prepWrite], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/'%(oFData.outDir,newRes,timeSample))
+
+            # -- write avg field into png 
+            # oFData.vizNpVecInTmplVTK(prepWrite, '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), 'testAvg.png')
+            
+            # -- POD
             if not takePODmatricesFromFiles:
-                for colInd in range(UBoxTu.shape[-1]):
-                    UBoxTu[:,colInd] = UBoxTu[:,colInd] - UBoxTuAvg
-
-                if withConv:
-                    t = np.linspace(0,0.0005*timeSample,timeSample)
-                    for i in range(3):
-                        # print(UBoxTu.shape)
-                        plt.plot(t,UBoxTu[i*300,:], label = '%d')
-                    plt.savefig('grafyKonvoluce/%dpredKonvoluci.png'%timeSample)
-                    plt.close()
-
-                    # gausian kernel
-                    # sigmaB = (3./4) ** 0.5 / shedFreq
-                    sigmaB = 0.0015 
-                    kernel = 1./((2*np.pi) ** 0.5 * sigmaB) * np.exp(-(t-t[-1]/2)**2/(2*sigmaB**2)) 
-                    # kernel = kernel / np.sum(kernel)
-                    kernel = kernel / np.linalg.norm(kernel)
-                    # kernel = signal.windows.gaussian(t, std=(sigmaB), sym=True)
-                    # print(np.sum(kernel))
-                    plt.plot(t,kernel)
-                    plt.savefig('grafyKonvoluce/%d_gaussJadro.png'%timeSample)
-                    plt.close()
-
-                    for i in range(3):
-                        conv = np.convolve(UBoxTu[i*300,:],kernel,mode='same')
-                        plt.plot(t,conv, label = '%d')
-                    plt.savefig('grafyKonvoluce/%dpoKonvoluci.png'%timeSample)
-                    plt.close()
-                    # window = signal.windows.gaussian(len(t), std=sigmaB, sym=True)
-                    # window = signal.windows.gaussian(len(t), std=0.1, sym=True)
-                    # window = signal.windows.hamming((10))
-                    # print(np.sum(window),np.linalg.norm(window))
-                    # plt.close()
-                    # plt.plot(t,window)
-                    # plt.savefig('grafyKonvoluce/%d_window.png'%timeSample)
-                    for i in range(UBoxTu.shape[0]):
-                        UBoxTu[i,:] = np.convolve(UBoxTu[i,:],kernel,mode='same')
-                    
-                if symFluc:
-                    print('Calculating symmetric and antisymmetric fluctulations.')
-                    oFData.symmetricAntiSymmericPOD(UBoxTu)
-                
-                print('Running POD, processed matrix size is: (%d,%d)'%UBoxTu.shape)
-
-                PsiBox,sBox,_ = np.linalg.svd(UBoxTu, full_matrices=False)   
-                _ = None     
-                etaMat   = (PsiBox.T).dot(UBoxTu)
-
-                modes = (PsiBox)
-                singVals = (sBox)
-                chronos = (etaMat)
-
+                # -- prepare directory for modes, sing values and etas writing
                 if not os.path.exists('%s/%s'%(outDir,newRes)):
                     os.mkdir('%s/%s'%(outDir,newRes))
 
@@ -143,64 +102,125 @@ for case in testedCases:
                 if not os.path.exists('%s/%s/%d/topos'%(outDir,newRes,timeSample)):
                     os.mkdir('%s/%s/%d/topos'%(outDir,newRes,timeSample))
 
-                with open('%s/%s/%d/modes.npy'%(outDir,newRes,timeSample),'wb') as fl:
-                    np.save(fl,modes)
-                with open('%s/%s/%d/singVals.npy'%(outDir,newRes,timeSample),'wb') as fl:
-                    np.save(fl,singVals)
-                with open('%s/%s/%d/chronos.npy'%(outDir,newRes,timeSample),'wb') as fl:
-                    np.save(fl,chronos)
-            else:
-                modes = np.load('%s/%s/%d/modes.npy'%(outDir,newRes,timeSample))
-                singVals = np.load('%s/%s/%d/singVals.npy'%(outDir,newRes,timeSample))
-                chronos = np.load('%s/%s/%d/chronos.npy'%(outDir,newRes,timeSample))
+                # -- make matrix of fluctulations
+                for colInd in range(UBoxTu.shape[-1]):
+                    UBoxTu[:,colInd] = UBoxTu[:,colInd] - UBoxTuAvg
 
-            # write results:
-            with open('%s/%s/%d/singVals.dat'%(outDir,newRes,timeSample),'w') as fl:
-                fl.writelines('x\tsingVal\tsingValLomSumasingVal\tsingValsqLomSumasingValsq\n')
-                for j in range(len(singVals)):
-                    fl.writelines('%d\t%g\t%g\t%g\n'%(j,singVals[j],singVals[j]/np.sum(singVals),singVals[j]**2/np.sum(singVals**2)))
-                plt.plot(singVals**2/np.sum(singVals**2),label='%d'%timeSample)
-                plt.yscale('log')
-                plt.xscale('log')
-                plt.ylim(10e-5,1)
-                plt.legend()
-                plt.savefig('%s/%s/%d/singVals.png'%(outDir,newRes,timeSample))
-                # plt.close()
+                # -- convolution of the fluctulations
+                if withConv:
+                    t = np.linspace(0,0.0005*timeSample,timeSample)
+                    if not os.path.exists('%s/%s/grafyKonvoluce'%(outDir,newRes)):
+                        os.mkdir('%s/%s/grafyKonvoluce'%(outDir,newRes))
+                    # gausian kernel
+                    # sigmaB = (3./4) ** 0.5 / shedFreq
+                    sigmaB = 0.0015 
+                    kernel = 1./((2*np.pi) ** 0.5 * sigmaB) * np.exp(-(t-t[-1]/2)**2/(2*sigmaB**2)) 
+                    kernel = kernel / np.linalg.norm(kernel)
+                    plt.plot(t,kernel)
+                    plt.savefig('%s/%s/grafyKonvoluce/%d_gaussJadro.png'%(outDir,newRes,timeSample))
+                    plt.close()
+
+                    # -- just to know what the convolution +- does
+                    for i in range(3):
+                        plt.plot(t,UBoxTu[i*300,:], label = '%d')
+                    plt.savefig('%s/%s/grafyKonvoluce/%dpredKonvoluci.png'%(outDir,newRes,timeSample))
+                    plt.close()
+
+                    for i in range(3):
+                        conv = np.convolve(UBoxTu[i*300,:],kernel,mode='same')
+                        plt.plot(t,conv, label = '%d')
+                    plt.savefig('%s/%s/grafyKonvoluce/%dpoKonvoluci.png'%(outDir,newRes,timeSample))
+                    plt.close()
+
+                    for i in range(UBoxTu.shape[0]):
+                        UBoxTu[i,:] = np.convolve(UBoxTu[i,:],kernel,mode='same')
+
+                # -- calculation of symmetric asymetric fluctulations + POD
+                if symFluc:
+                    print('Calculating symmetric and antisymmetric fluctulations.')
+                    Usym, UAsym = oFData.UsymUAsym(UBoxTu, plochaName = plochaNazev,onlyXY=onlyXY, indFromFile = indFromFile)
+                    
+                    # -- test ==> write one fluctulation
+                    # fluc0TestWriteSym = np.append(Usym[:,0].reshape(-1,2), np.zeros((Usym[:,0].shape[0]//2,1)), axis =1)
+                    # oFData.writeVtkFromNumpy('fluc0TestWriteSym.vtk', [fluc0TestWriteSym], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                    # fluc0TestWriteASym = np.append(UAsym[:,0].reshape(-1,2), np.zeros((UAsym[:,0].shape[0]//2,1)), axis =1)
+                    # oFData.writeVtkFromNumpy('fluc0TestWriteASym.vtk', [fluc0TestWriteASym], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                    
+                    
+                    # -- symmetric/antisymmetric POD and save results
+                    modesSym, singValsSym, chronosSym = oFData.POD(Usym)
+                    modesASym, singValsASym, chronosASym = oFData.POD(UAsym)
+                    np.save('%s/%s/%d/modesSym.npy'%(outDir,newRes,timeSample),modesSym)
+                    np.save('%s/%s/%d/singValsSym.npy'%(outDir,newRes,timeSample),singValsSym)
+                    np.save('%s/%s/%d/chronosSym.npy'%(outDir,newRes,timeSample),chronosSym)
+                    np.save('%s/%s/%d/modesASym.npy'%(outDir,newRes,timeSample),modesASym)
+                    np.save('%s/%s/%d/singValsASym.npy'%(outDir,newRes,timeSample),singValsASym)
+                    np.save('%s/%s/%d/chronosASym.npy'%(outDir,newRes,timeSample),chronosASym)
+                    
+                    # -- write singular values:
+                    oFData.writeSingVals(singValsSym,'%s/%s'%(outDir,newRes), timeSample, name='singValsSym')
+                    oFData.writeSingVals(singValsASym,'%s/%s'%(outDir,newRes), timeSample, name='singValsASym')
+
+                else:
+                    # -- POD and save results
+                    modes, singVals, chronos = oFData.POD(UBoxTu)
+                    np.save('%s/%s/%d/modes.npy'%(outDir,newRes,timeSample),modes)
+                    np.save('%s/%s/%d/singVals.npy'%(outDir,newRes,timeSample),singVals)
+                    np.save('%s/%s/%d/chronos.npy'%(outDir,newRes,timeSample),chronos)
+                    
+                    # -- write singular values 
+                    oFData.writeSingVals(singValsSym,'%s/%s'%(outDir,newRes), timeSample, name='singVals')
             
-            for i in range(30):
-                if onlyXY:
-                    # oFData.writeField(modes[:,i],procFields[0],'Topos%d_%s'%(i+1,procFields[0]),caseDir,outDir='%s/%s/%d/topos/'%(outDir,newRes,timeSample),plochaName = plochaNazev)
-                    prepWrite = np.append(modes[:,i].reshape(-1,2), np.zeros((modes[:,i].shape[0]//2,1)), axis =1)
-                    # oFData.writeVtkFromNumpy('mode%d.vtk'%(i+1), [prepWrite], '%s/postProcessing/sample/3.90006723/U_plochaHor3_filtered.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
-                    oFData.writeVtkFromNumpy('mode%d.vtk'%(i+1), [prepWrite], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
-            if onlyXY:
-                prepWrite = np.append(UBoxTuAvg[:].reshape(-1,2), np.zeros((UBoxTuAvg[:].shape[0]//2,1)), axis =1)
-                oFData.writeVtkFromNumpy('avg.vtk', [prepWrite], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/'%(oFData.outDir,newRes,timeSample))
+            # -- load POD stuff from file
             else:
-                prepWrite = UBoxTuAvg[:].reshape(-1,3)
-                oFData.writeVtkFromNumpy('avg.vtk', [prepWrite], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/'%(oFData.outDir,newRes,timeSample))
-            # oFData.writeField(UBoxTuAvg[:],procFields[0],'avg_%s'%(procFields[0]),caseDir,outDir='%s/%s/%d/'%(outDir,newRes,timeSample),plochaName = plochaNazev)
-                # prepWrite = np.append(modes[:,i].reshape(-1,2), np.zeros((modes[:,i].shape[0]//2,1)), axis =1)
-                # oFData.writeVtkFromNumpy('mode%d.vtk'%(i+1), [prepWrite], '%s/postProcessing/sample/3.90006723/U_plochaHor3_filtered.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                if symFluc:
+                    modesSym = np.load('%s/%s/%d/modesSym.npy'%(outDir,newRes,timeSample))
+                    singValsSym = np.load('%s/%s/%d/singValsSym.npy'%(outDir,newRes,timeSample))
+                    chronosSym = np.load('%s/%s/%d/chronosSym.npy'%(outDir,newRes,timeSample))
+                    modesASym = np.load('%s/%s/%d/modesASym.npy'%(outDir,newRes,timeSample))
+                    singValsASym = np.load('%s/%s/%d/singValsASym.npy'%(outDir,newRes,timeSample))
+                    chronosASym = np.load('%s/%s/%d/chronosASym.npy'%(outDir,newRes,timeSample))
+                else:
+                    modes = np.load('%s/%s/%d/modes.npy'%(outDir,newRes,timeSample))
+                    singVals = np.load('%s/%s/%d/singVals.npy'%(outDir,newRes,timeSample))
+                    chronos = np.load('%s/%s/%d/chronos.npy'%(outDir,newRes,timeSample)) 
+        
+            # -- write modes
+            for i in range(nModes):
+                if symFluc:
+                    if onlyXY:
+                        prepWriteSym = np.append(modesSym[:,i].reshape(-1,2), np.zeros((modesSym[:,i].shape[0]//2,1)), axis =1)
+                        prepWriteASym = np.append(modesASym[:,i].reshape(-1,2), np.zeros((modesASym[:,i].shape[0]//2,1)), axis =1)
+                    else:
+                        prepWriteSym = modesSym[:,i].reshape(-1,3)
+                        prepWriteASym = modesASym[:,i].reshape(-1,3)
+                    oFData.writeVtkFromNumpy('mode%dSym.vtk'%(i+1), [prepWriteSym], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                    oFData.writeVtkFromNumpy('mode%dASym.vtk'%(i+1), [prepWriteASym], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                else:
+                    if onlyXY:
+                        prepWrite = np.append(modes[:,i].reshape(-1,2), np.zeros((modes[:,i].shape[0]//2,1)), axis =1)
+                    else:
+                        prepWrite = modes[:,i].reshape(-1,3)
+                    oFData.writeVtkFromNumpy('mode%d.vtk'%(i+1), [prepWrite], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
 
-        plt.close()
-        err = np.empty((0,modesToComp))
-        refModes = np.load('%s/%s/%d/modes.npy'%(outDir,newRes,timeSamples[-1]))[:,:modesToComp]
-        for i in range(len(timeSamples)):
-            modes = np.load('%s/%s/%d/modes.npy'%(outDir,newRes,timeSamples[i]))[:,:modesToComp]
-            errTu = np.empty(0)
-            for i in range(modesToComp):
-                chyba = np.linalg.norm(np.abs(modes[:,i])-np.abs(refModes[:,i]))
-                errTu = np.append(errTu, chyba)
-            err = np.append(err, errTu.reshape(1,-1), axis=0)
+        # -- convergence of modes and mean values
+        # errModes = np.empty((0,modesToComp))
+        # refModes = np.load('%s/%s/%d/modes.npy'%(outDir,newRes,timeSamples[-1]))[:,:modesToComp]
+        # for i in range(len(timeSamples)):
+        #     modes = np.load('%s/%s/%d/modes.npy'%(outDir,newRes,timeSamples[i]))[:,:modesToComp]
+        #     errTu = np.empty(0)
+        #     for i in range(modesToComp):
+        #         chyba = np.linalg.norm(np.abs(modes[:,i])-np.abs(refModes[:,i]))
+        #         errTu = np.append(errTu, chyba)
+        #     err = np.append(errModes, errTu.reshape(1,-1), axis=0)
         
-        for i in range(modesToComp):
-            plt.plot(timeSamples, err[:,i],label='mode %d'%(i+1))
-        plt.legend()
-        plt.savefig('%s/%s/errCompModes.png'%(outDir,newRes))  
+        # for i in range(modesToComp):
+        #     plt.plot(timeSamples[:-1], err[:-1,i],label='mode %d'%(i+1))
+        # plt.legend()
+        # plt.savefig('%s/%s/errCompModes.png'%(outDir,newRes))  
         
         plt.close()
-        plt.plot(timeSamples, errorInAvg)
+        plt.plot(timeSamples[:-1], errorInAvg[:-1])
         plt.legend()
         plt.savefig('%s/%s/errCompAvgsU.png'%(outDir,newRes))  
 

@@ -39,7 +39,7 @@ class OpenFoamData:
             os.makedirs('%s/'%(self.outDir))
     
     # -- function to load time and vtk list
-    def loadVTKandTimeLst(self):
+    def loadVTKandTimeLst(self,plochaName = "plochaHor.vtk"):
         fld = self.caseDir + '/postProcessing/sample/'
         times = sorted([time for time in os.listdir(fld) if isFloat(time)])
         times = [time for time in times if float(time) >= self.startTime and float(time) <= self.endTime]
@@ -60,32 +60,20 @@ class OpenFoamData:
                 self.loadFieldFilesCase(field)
         elif self.storage == 'PPS':
             # -- load all times
-            # fld = self.caseDir + '/postProcessing/sample/'
-            # times = sorted([time for time in os.listdir(fld) if isFloat(time)])
-            # times = [time for time in times if float(time) >= self.startTime and float(time) <= self.endTime]
-            # vtkFiles = []
-            # for time in times:
-            #     if os.path.isfile('%s/%s/%s_new.vtk'%(fld,time,plochaName.split('.')[0])):
-            #         vtkFiles.append('%s/%s/%s_new.vtk'%(fld,time,plochaName.split('.')[0]))
-            #     elif os.path.isfile('%s/%s/%s'%(fld,time,plochaName)):
-            #         vtkFiles.append('%s/%s/%s'%(fld,time,plochaName))
-            # self.timeLst = times
-            # self.vtkFiles = vtkFiles
-            self.loadVTKandTimeLst()
+            self.loadVTKandTimeLst(plochaName=plochaName)
             print('Loaded %d vtkFiles from time %s to time %s' % (len(self.vtkFiles), times[0], times[-1]))
 
+            # -- reference field
             ref = self.loadNumpyFromVtk(self.vtkFiles[0])[0]
-            # -- prepare Y_npy
             
+            # -- prepare Y_npy
             with open(self.vtkFiles[0], 'r') as file:
                 data = file.readlines()
 
             # -- get the output dimensions
-            mkDelTu = mkDel[:]
             self.lenVecsNCells.append(self.getVecLengthPPS(data))
-            nCells = self.lenVecsNCells[-1][1]
-            lenVec = self.lenVecsNCells[-1][0]
-
+            
+            # -- get matrix of snapshots
             if onlyXY:
                 Y = np.empty((ref.shape[0]*2,0))
             else:
@@ -351,10 +339,95 @@ class OpenFoamData:
         
         return fields
 
+    # -- function to read points of field from vtk
+    def loadPointsFromVTK(self,vtkName):
+        reader = vtk.vtkGenericDataObjectReader()
+        reader.SetFileName(vtkName)
+        reader.Update()
+
+        data = reader.GetOutput()
+        cell_Iterator = data.NewCellIterator()
+        pointsInds = []
+        while cell_Iterator:
+            cellID = cell_Iterator.GetCellId()
+            cellData = data.GetCell(cellID)
+            cell_Iterator.GoToNextCell()
+
+        return pts
+
+    # -- function to calculate indices for flipping the field
+    def loadIndicesForFlipping(self, flip_axis = [1, -1, 1],plochaName = "plochaHor.vtk"):
+        # -- load source field
+        reader = vtk.vtkGenericDataObjectReader()
+        reader.SetFileName(self.vtkFiles[0])
+        reader.Update()
+        source = reader.GetOutput()
+
+        # Create a filter for flipping the data
+        data = reader.GetOutput()
+        flip_filter = vtk.vtkTransformFilter()
+        flip_transform = vtk.vtkTransform()
+        flip_transform.Scale(flip_axis[0], flip_axis[1], flip_axis[2])
+        flip_filter.SetTransform(flip_transform)
+        flip_filter.SetInputData(data)
+        flip_filter.Update()
+        target = flip_filter.GetOutput()
+        
+        # -- locator in the target mesh 
+        locator = vtk.vtkPointLocator()
+        locator.SetDataSet(target)
+        locator.BuildLocator()
+        
+        # -- cells in target mesh 
+        cellsOld = np.array(target.GetPolys().GetData()).reshape(target.GetNumberOfCells(),-1)[:,1:]
+        
+        # -- find indexes that transform into new one after flipping
+        indexes = np.zeros(source.GetNumberOfCells())
+        closestPoint = np.empty((3,3))
+        for i in range(source.GetNumberOfCells()):
+            # -- for each cell in source find where it is in new vtk
+            cell = source.GetCell(i)
+            if isinstance(cell, vtk.vtkTriangle):
+                cellPoints = cell.GetPoints()
+                for j in range(cell.GetNumberOfPoints()):
+                    closestPoint[j,:] = cellPoints.GetPoint(j)
+                clPointLst = np.array([locator.FindClosestPoint(closestPoint[i,:]) for i in range(3)])
+                cellsInTarget = np.where(cellsOld == np.array([clPointLst[j]]))[0]
+                for j in range(2):
+                    cellIndTu = np.where(cellsOld == np.array([clPointLst[j+1]]))[0]
+                    cellsInTarget = np.intersect1d(cellIndTu, cellsInTarget)
+                try:
+                    closestPointId = cellsInTarget[0]
+                except:
+                    print('Chyba:\n\tbod:', i)
+                    try:
+                        closestPointId = cellIndTu[0]
+                    except:
+                        pass
+                indexes[i] = closestPointId
+            else:
+                print('Cell is not triangle.')
+        print(indexes)
+        print('Saving indexes with shape %s'%str(indexes.shape))
+        np.save('%s/indexes_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]),indexes)
+
     # -- function to run symmetric and anytisymetric POD
-    def symmetricAntiSymmericPOD(self, UBox):
-        print(UBox.shape)
-        print(self.loadNumpyFromVtk(self.vtkFiles[0]))
+    def UsymUAsym(self, UBox, plochaName = "plochaHor.vtk",onlyXY=False,indFromFile=False):
+        if onlyXY:
+            self.loadVTKandTimeLst(plochaName = plochaName)
+            if indFromFile:
+                indices = np.load('%s/indexes_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]))
+                print('Loading indexes with shape %s'%str(indices.shape))
+            else:
+                indices = self.loadIndicesForFlipping(plochaName = plochaName)
+            indices = indices.astype(int)
+            USym = np.zeros((UBox.shape))
+            UASym = np.zeros((UBox.shape))
+            for colI in range(UBox.shape[1]):
+                UTu = UBox[:,colI].reshape((-1,2))
+                USym[:, colI] = ((UTu + np.array([1,-1]) *UTu[indices])/2).reshape(-1)
+                UASym[:, colI] = ((UTu + np.array([-1,1]) * UTu[indices])/2).reshape(-1)
+        return USym, UASym
     
     # -- function to write vtk from numpy fields
     # -- name -- name of the file, fields -- numpy fields to write, template -- template vtk, dest -- directory to store
@@ -364,7 +437,7 @@ class OpenFoamData:
         reader.Update()
 
         if not os.path.exists(dest):
-            os.mkdir(dest)
+            os.makedirs(dest)
 
         data = reader.GetOutput()
         
@@ -446,10 +519,19 @@ class OpenFoamData:
         for fieldI in range(len(self.procFields)):
             avgs[fieldI] = avgs[fieldI] / nTimes
         self.writeVtkFromNumpy('avg.vtk', avgs, '%s/%s/VTK/%s'%(self.caseDir,proc,vtkNazevTu), '%s/%s/%s/'%(self.caseDir,proc,avgName))
+    
+    # -- function to run POD
+    def POD(self, UBoxTu):
+        print('Running POD, processed matrix size is: (%d,%d)'%UBoxTu.shape)
 
+        PsiBox,sBox,_ = np.linalg.svd(UBoxTu, full_matrices=False)   
+        _ = None     
+        etaMat   = (PsiBox.T).dot(UBoxTu)
+        
+        return PsiBox, sBox, etaMat
 
     # --- function to run PO decomposition
-    def POD(self, singValsFile = ''):
+    def PODold(self, singValsFile = ''):
         for i in range(len(self.Ys)):
             UBox = np.copy(self.Ys[i])
             for colInd in range(UBox.shape[-1]):
@@ -499,6 +581,19 @@ class OpenFoamData:
                         for j in range(len(self.randsingVals[-1])):
                             fl.writelines('%d\t%g\t%g\t%g\t%g\n'%(j,self.randsingVals[-1][j],self.randsingVals[-1][j]/np.sum(self.randsingVals[-1]),self.randsingVals[-1][j]**2/np.sum(self.randsingVals[-1]**2),np.abs(self.singVals[i][j]-self.randsingVals[-1][j])/self.singVals[i][j]))
 
+    # -- write singular values 
+    def writeSingVals(self, singVals, outDir, timeSample, name='singVals'):
+        with open('%s/%d/%s.dat'%(outDir,timeSample,name),'w') as fl:
+            fl.writelines('x\tsingVal\tsingValLomSumasingVal\tsingValsqLomSumasingValsq\n')
+            for j in range(len(singVals)):
+                fl.writelines('%d\t%g\t%g\t%g\n'%(j,singVals[j],singVals[j]/np.sum(singVals),singVals[j]**2/np.sum(singVals**2)))
+        plt.plot(singVals**2/np.sum(singVals**2),label='%d'%timeSample)
+        plt.yscale('log')
+        plt.xscale('log')
+        plt.ylim(10e-5,1)
+        plt.legend()
+        plt.savefig('%s/%d/%s.png'%(outDir,timeSample,name))
+        plt.close()
 
     # vizualize etas
     def vizChronos(self,nChronos = 1,myRange = [0,-1],svFig=''):
@@ -760,7 +855,6 @@ class OpenFoamData:
             plt.legend()
             plt.savefig('%s/scaledEtas0-%dRe115.png'%(self.outDir,nChronos))
             
-    
     # -- write chronos
     def writeChronos(self,nChronos=1,svFig='',ylims = (1e-5,10)):
         for i in range(len(self.procFields)):
@@ -780,7 +874,78 @@ class OpenFoamData:
                         strHere += '\t%g'%self.chronos[i][j,etaInd]
                     strHere += '\n'
                     fl.writelines(strHere)
+    
+    # -- viz numpy according to template vtk 
+    def vizNpVecInTmplVTK(self, fldToViz, tmplVtk, outFileName, nameOfTheField='poleKViz',componentToViz=0):
+        print('Saving vtkfield with shape %s into png'%(str(fldToViz.shape)))
+        # Read template VTK file
+        reader = vtk.vtkPolyDataReader()
+        reader.SetFileName(tmplVtk)
+        reader.Update()
+        
+        tmpl = reader.GetOutput()
+        
+        # Create the filter with array
+        arrayFilter = vtk.vtkDoubleArray()
+        arrayFilter.SetName(nameOfTheField)
+        arrayFilter.SetNumberOfComponents(1)
+        # arrayFilter.SetNumberOfComponents(3)
+        arrayFilter.SetNumberOfTuples(tmpl.GetNumberOfCells())
 
+        for i in range(tmpl.GetNumberOfCells()):
+            # arrayFilter.SetTuple(i, fldToViz[i])
+            arrayFilter.SetTuple1(i, fldToViz[i,componentToViz])
+        
+        # Add the the filter to data
+        tmpl.GetCellData().AddArray(arrayFilter)
+        
+        # Create a lookup table for colors
+        colorLookupTable = vtk.vtkLookupTable()
+        colorLookupTable.SetNumberOfColors(256)
+        colorLookupTable.SetHueRange(0.0, 0.667)  # Adjust the range for desired colors
+        colorLookupTable.Build()
 
+        # Create a mapper for vorticity visualization
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(reader.GetOutputPort())
+        scalarMin = min(fldToViz[i][componentToViz] for i in range(tmpl.GetNumberOfCells()))
+        scalarMax = max(fldToViz[i][componentToViz] for i in range(tmpl.GetNumberOfCells()))
 
+        mapper.SetScalarRange(scalarMin, scalarMax)
+        # mapper.SetScalarRange(arrayFilter.GetRange())
+        mapper.SetLookupTable(colorLookupTable)
+        mapper.ScalarVisibilityOn()
+        mapper.SetScalarModeToUsePointData()
+        mapper.SelectColorArray(nameOfTheField)
+        
+        # Create an actor for vorticity visualization
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+
+        # Create a renderer, set background color, and add the actor
+        renderer = vtk.vtkRenderer()
+        # renderer.SetBackground(0.2, 0.3, 0.4)
+        renderer.AddActor(actor)
+
+        # Create a render window
+        renderWindow = vtk.vtkRenderWindow()
+        renderWindow.AddRenderer(renderer)
+        renderWindow.SetSize(800, 600)
+
+        # Use vtkWindowToImageFilter to capture the rendered image
+        windowToImageFilter = vtk.vtkWindowToImageFilter()
+        windowToImageFilter.SetInput(renderWindow)
+        windowToImageFilter.Update()
+
+        # Save the image as a PNG file
+        writer = vtk.vtkPNGWriter()
+        writer.SetFileName('%s/%s'%(self.outDir,outFileName))
+        writer.SetInputConnection(windowToImageFilter.GetOutputPort())
+        writer.Write()
+        
+        writer = vtk.vtkGenericDataObjectWriter()
+        writer.SetFileName('%s/%s.vtk'%(self.outDir,outFileName.split('.png')[0]))
+        # writer.SetInputData(reader.GetOutput())
+        writer.SetInputData(tmpl)
+        writer.Write()
 

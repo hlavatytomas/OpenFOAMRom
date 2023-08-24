@@ -1,5 +1,6 @@
-# -- Python class to store and postProcess OpenFOAM data
+# -- Python class to store, postProcess and analyze OpenFOAM data
 
+# -- imports
 import numpy as np
 import os
 import matplotlib.pyplot as plt
@@ -7,11 +8,11 @@ import pickle
 from math import floor
 import vtk
 from multiprocessing import Pool
+from scipy import sparse
 # import pyrennModV3 as prn
 
 # -- custom function
 from myAddFcs import *
-
 
 # class to store openfoam data in python and perform ROM stuff (POD, ROM)
 class OpenFoamData:
@@ -24,36 +25,37 @@ class OpenFoamData:
         self.outDir = outDir                                           # where to save results
         self.Ys = []                                                   # python list with openfoam field data stored as numpy arrays
         self.mkDels = []                                               # python list with deleted dimensions in self.Ys numpy fields
-        self.lenVecsNCells = []                                        # python list with fields dimensions: [lenVec,nCells]
+        self.lenVecsNCells = []                                        # python list with fields dimensions: [[lenVec, nCells]]
         self.avgs = []                                                 # python list with openfoam averaged fields
-        self.modes = []                                                # python list with calculated modes
-        self.chronos = []                                              # saved chronoses
-        self.singVals = []                                             # singular values of the PO decomposition
-        self.randmodes = []                                                # python list with calculated modes
-        self.randchronos = []                                              # saved chronoses
-        self.randsingVals = []                                             # singular values of the PO decomposition
+        self.modes = []                                                # -- NOTETH: legacy python list with calculated modes
+        self.chronos = []                                              # -- NOTETH: legacy python list with saved chronoses
+        self.singVals = []                                             # -- NOTETH: legacy python list with singular values of the PO decomposition
+        self.randmodes = []                                            # -- NOTETH: legacy python list with calculated randomized modes
+        self.randchronos = []                                          # -- NOTETH: legacy python list with saved randomized chronoses
+        self.randsingVals = []                                         # -- NOTETH: legacy python list with randomized singular values of the PO decomposition
         self.parallel = parallel
-        print('I am creating %s OpenFOAM fields in Python in %s, in time interval from %g to %g, looking into %s.'%(str(self.procFields),self.caseDir,self.startTime,self.endTime,self.storage)) 
+        print('I am creating %s OpenFOAM fields in Python in %s, in time interval from %g to %g, looking into %s.'%(str(self.procFields), self.caseDir, self.startTime, self.endTime, self.storage)) 
         # --- create out directory
         if not os.path.exists('%s/'%(self.outDir)):             
             os.makedirs('%s/'%(self.outDir))
     
     # -- function to load time and vtk list
-    def loadVTKandTimeLst(self,plochaName = "plochaHor.vtk"):
+    # -- NOTETH: only for PPS case at the moment
+    def loadVTKandTimeLst(self, plochaName = "plochaHor.vtk"):
         fld = self.caseDir + '/postProcessing/sample/'
         times = sorted([time for time in os.listdir(fld) if isFloat(time)])
         times = [time for time in times if float(time) >= self.startTime and float(time) <= self.endTime]
         vtkFiles = []
         for time in times:
-            if os.path.isfile('%s/%s/%s_new.vtk'%(fld,time,plochaName.split('.')[0])):
-                vtkFiles.append('%s/%s/%s_new.vtk'%(fld,time,plochaName.split('.')[0]))
-            elif os.path.isfile('%s/%s/%s'%(fld,time,plochaName)):
-                vtkFiles.append('%s/%s/%s'%(fld,time,plochaName))
+            if os.path.isfile('%s/%s/%s_new.vtk'%(fld, time, plochaName.split('.')[0])):
+                vtkFiles.append('%s/%s/%s_new.vtk'%(fld, time, plochaName.split('.')[0]))
+            elif os.path.isfile('%s/%s/%s'%(fld, time, plochaName)):
+                vtkFiles.append('%s/%s/%s'%(fld, time, plochaName))
         self.timeLst = times
         self.vtkFiles = vtkFiles
 
     # --- function to load openfoam data for given fields into numpy arrays
-    def loadYsFromOFData(self,plochaName = "plochaHor.vtk",mkDel = [],onlyXY=False):
+    def loadYsFromOFData(self, plochaName = "plochaHor.vtk", mkDel = [], onlyXY=False):
         if self.storage == 'case':
             for i in range(len(self.procFields)):
                 field = self.procFields[i]
@@ -61,7 +63,7 @@ class OpenFoamData:
         elif self.storage == 'PPS':
             # -- load all times
             self.loadVTKandTimeLst(plochaName=plochaName)
-            print('Loaded %d vtkFiles from time %s to time %s' % (len(self.vtkFiles), times[0], times[-1]))
+            print('Loaded %d vtkFiles from time %s to time %s' % (len(self.vtkFiles), str(self.timeLst[0]), str(self.timeLst[-1])))
 
             # -- reference field
             ref = self.loadNumpyFromVtk(self.vtkFiles[0])[0]
@@ -88,126 +90,6 @@ class OpenFoamData:
             self.Ys.append(Y)
             if onlyXY:
                 self.mkDels.append(2)
-            
-    # --- function to read oF file and to return the length of vector and number of cells -- case
-    def getVecLengthCase(self,data):
-        for i in range(len(data)):
-            if data[i].find('internalField') == 0:                          #it is at the line beginning
-                numCells = int(data[i+1])                                   #get number of cells in the mesh
-                try:
-                    start  = data[i+3].rindex( '(' ) + len( '(' )
-                    end    = data[i+3].index( ')', start )
-                    auxVar =  data[i+3][start:end]
-                    return len([float(numStr) for numStr in auxVar.split(' ')]),numCells
-                except ValueError:
-                    return [1,numCells]
-
-    # --- function to read oF file and to return the length of vector and number of cells -- PPS
-    def getVecLengthPPS(self,data):
-        for i in range(len(data)):
-            if data[i].find('CELL_DATA') == 0:                          #it is at the line beginning
-                return int(data[i+2].replace('\n','').split(' ')[1]), int(data[i+2].replace('\n','').split(' ')[2])
-
-    # --- function to read vol(Scalar/Vector)Field from an oF result file
-    def readInternalField(self,data):
-        lV  = self.lenVecsNCells[-1][0]
-        numCells = self.lenVecsNCells[-1][1]
-        for i in range(len(data)):
-            if data[i].find('internalField') == 0 and self.storage == 'case' or data[i].find('CELL_DATA') == 0:     #it is at the line beginning
-                # numCells = int(data[i-2].replace('\n','').split(' ')[1])                                                  #get number of cells in the mesh
-                # auxStr = " ".join(data[i+3:i+4+numCells]).translate(string.maketrans('', ''), '()\n').split(' ')
-                auxStr = " ".join(data[i+3:i+4+numCells]).replace(')','').replace('(','').replace('\n','').split(' ')
-                return np.array([float(numStr) for numStr in auxStr if isFloat(numStr)]).reshape(numCells,lV)
-
-    # --- function to load openfoam data as case option
-    def loadFieldFilesCase(self,field,mkDel = []):
-        with open('%s/%g/%s'%(self.caseDir,self.timeLst[0],field), 'r') as file:
-            data = file.readlines()
-
-        # -- get the output dimensions
-        mkDelTu = mkDel[:]
-        self.lenVecsNCells.append(self.getVecLengthCase(data))
-        nCells = self.lenVecsNCells[-1][1]
-        lenVec = self.lenVecsNCells[-1][0]
-        print('Field %s has %d dimensions in %d cells.' %(field,lenVec,nCells))
-        nTimes = len(self.timeLst)
-        
-        # -- allocate the output variable
-        Y   = np.zeros((nCells,lenVec,nTimes))
-        
-        # -- load the data
-        for i in range(nTimes):
-            print('Reading field %s from time %g'%(field,self.timeLst[i]))
-            Y[:,:,i] = self.readInternalField(data)                              #I have the first data preloaded
-            if i+1 < nTimes:                                                #if there is another file, load it
-                with open('%s/%g/%s'%(self.caseDir,self.timeLst[i+1],field), 'r') as file:
-                    data = file.readlines()
-
-        # -- check for empty dimensions in the data
-        valsNorm = [np.linalg.norm(Y[:,i,:]) for i in range(lenVec)]
-        meanNorm = np.mean(valsNorm)
-        for i in range(lenVec):
-            if valsNorm[i] <= meanNorm/100:
-                mkDelTu.append(i)    
-
-        self.mkDels.append(mkDelTu)
-
-        # -- delete empty dimensions and save the rest
-        Y = np.delete(Y,mkDelTu,1)
-        Y = np.reshape(Y, (Y.shape[0]*Y.shape[1],nTimes))
-        print('I have loaded matrix Y with dimensions %d x %d of the field %s, %s dimension was deleted.'%(Y.shape[0],Y.shape[1],field,mkDelTu))
-        self.Ys.append(Y)
-        # return np.delete(Y,mkDel,1),lenVec,mkDel
-    
-    # --- function to load openfoam data as case PPS option
-    def loadFieldFilesPPS(self,field,plochaName,mkDel = [],onlyXY=False):
-        with open('%s/postProcessing/sample/%g/%s_%s'%(self.caseDir,self.timeLst[0],field,plochaName), 'r') as file:
-            data = file.readlines()
-
-        # -- get the output dimensions
-        mkDelTu = mkDel[:]
-        self.lenVecsNCells.append(self.getVecLengthPPS(data))
-        nCells = self.lenVecsNCells[-1][1]
-        lenVec = self.lenVecsNCells[-1][0]
-        print('Field %s has %d dimensions in %d cells.' %(field,lenVec,nCells))
-        nTimes = len(self.timeLst)
-        
-        # -- allocate the output variable
-        Y   = np.zeros((nCells,lenVec,nTimes))
-        
-        # -- load the data
-        for i in range(nTimes):
-            print('Reading field %s from time %g'%(field,self.timeLst[i]))
-            Y[:,:,i] = self.readInternalField(data)                              #I have the first data preloaded
-            if i+1 < nTimes:                                                #if there is another file, load it
-                # if mista == None:
-                #     with open('%s/postProcessing/sample/%g/%s_%s'%(self.caseDir,self.timeLst[i+1],field,plochaName), 'r') as file:
-                #         data = file.readlines()
-                # else:
-                    # kam = ('%s/postProcessing/sample/%1.'+str(mista)+'f/%s_%s')
-                    # print(self.timeLst[i+1])
-                with open('%s/postProcessing/sample/%s/%s_%s'%(self.caseDir,self.timeLstStr[i+1],field,plochaName), 'r') as file:
-                    data = file.readlines()
-
-        # -- check for empty dimensions in the data
-        valsNorm = [np.linalg.norm(Y[:,i,:]) for i in range(lenVec)]
-        meanNorm = np.mean(valsNorm)
-        for i in range(lenVec):
-            if valsNorm[i] <= meanNorm/100:
-                mkDelTu.append(i)    
-
-        if onlyXY and lenVec > 2:
-            if "Ver" in plochaName:
-                mkDelTu.append(1)
-            mkDelTu.append(2)
-
-        self.mkDels.append(mkDelTu)        
-
-        # -- delete empty dimensions and save the rest
-        Y = np.delete(Y,mkDelTu,1)
-        Y = np.reshape(Y, (Y.shape[0]*Y.shape[1],nTimes))
-        print('I have loaded matrix Y with dimensions %d x %d of the field %s, %s dimension was deleted.'%(Y.shape[0],Y.shape[1],field,mkDelTu))
-        self.Ys.append(Y)
     
     # --- function to save fields into numpy fields
     def saveYsFromNPField(self):
@@ -232,130 +114,8 @@ class OpenFoamData:
         with open('%s/lenVecNCells.data'%self.outDir, 'rb') as f:
             self.lenVecsNCells = pickle.load(f)
         print('I have loaded nCells and lenVec vals as %s.'%str(self.lenVecsNCells))
-    
-    # --- function to write fields (at the moment 'case' option works)
-    def writeField(self, field, templateFieldName, fieldName, caseDir, outDir='100',data=[], plochaName = 'plochaHor.vtk'):
-        if self.storage == 'case':
-            if not os.path.exists('%s'%(outDir)):
-                os.makedirs('%s'%(outDir))
-            
-            # -- input field properties
-            procFldInd = self.procFields.index(templateFieldName)
-            mkDel = self.mkDels[procFldInd]
-            nCells = self.lenVecsNCells[procFldInd][1]
-            lenVec = self.lenVecsNCells[procFldInd][0]
-        
-            # -- replace location and object in out file
-            if data == []:
-                with open('%s/%g/%s'%(caseDir, self.timeLst[0], templateFieldName), 'r') as file:
-                    data = file.readlines()
-                    idStr = ['location', 'object']
-                    pVals = [outDir.split('/')[-2],fieldName]
-                    
-                    for j in range(len(idStr)):
-                        for k in range(len(data)):
-                            fInd = data[k].find(idStr[j])
-                            if fInd>-1:
-                                data[k] = data[k][:fInd] + idStr[j] + '\t' + pVals[j] + ';\n'
-                                break
-            
-            print('I am writing field %s with %d cells and %d length of vector.'%(fieldName,nCells,lenVec))
-            field = np.reshape(field,(nCells,lenVec-len(mkDel)))
-            field = np.insert(field,mkDel,0,axis=1)                    
-            # -- write in the data
-            if field.shape[1] == 1:
-                for i in range(len(data)):
-                    if data[i].find('internalField') == 0:                          #it is at the line beginning
-                        for j in range(3,nCells+3):
-                            data[i+j] = '%5.4e\n'%(field[j-3])                  #type will be numpy ndArray
-                        break
-            else:
-                for i in range(len(data)):
-                    if data[i].find('internalField') == 0:                          #it is at the line beginning
-                        for j in range(3,nCells+3):
-                            data[i+j] = '(%5.4e %5.4e %5.4e)\n'%tuple([field[j-3,k] for k in range(lenVec)])
-                        break
-                
-            with open('%s/%s'%(outDir,fieldName), 'w') as file:
-                file.writelines( data )
-            return data
-        elif self.storage == 'PPS':
-            if not os.path.exists('%s'%(outDir)):
-                os.makedirs('%s'%(outDir))
-            
-            # -- input field properties
-            procFldInd = self.procFields.index(templateFieldName)
-            mkDel = self.mkDels[procFldInd]
-            nCells = self.lenVecsNCells[procFldInd][1]
-            lenVec = self.lenVecsNCells[procFldInd][0]
-        
-            # -- replace location and object in out file
-            if data == []:
-                with open(self.vtkFiles[0], 'r') as file:
-                    data = file.readlines()
-            
-            print('I am writing field %s with %d cells and %d length of vector.'%(fieldName,nCells,lenVec))
-            field = np.reshape(field,(nCells,lenVec-len(mkDel)))
-            field = np.insert(field,mkDel,0,axis=1)                    
-            # -- write in the data
-            if field.shape[1] == 1:
-                for i in range(len(data)):
-                    if data[i].find('CELL_DATA') == 0:                          #it is at the line beginning
-                        for j in range(3,int(floor(nCells/10))+3):
-                            data[i+j] = '%5.4e %5.4e %5.4e %5.4e %5.4e %5.4e %5.4e %5.4e %5.4e %5.4e\n'%tuple([field[10*(j-3)+k,0] for k in range(10)])                #type will be numpy ndArray
-                        poslR = ''
-                        for num in range(nCells%10,0,-1):
-                            poslR += '%5.4e '%field[- num,0]
-                        poslR += '\n'
-                        try:
-                            data[i+int(floor(nCells/10))+3] = poslR 
-                        except:
-                            data.append(poslR)
-                        break
-            else:
-                for i in range(len(data)):
-                    if data[i].find('CELL_DATA') == 0:                          #it is at the line beginning
-                        for j in range(3,nCells+3):
-                            data[i+j] = '%5.4e %5.4e %5.4e\n'%tuple([field[j-3,k] for k in range(lenVec)])
-                        break
-                
-            with open('%s/%s_%s.vtk'%(outDir,fieldName,plochaName), 'w') as file:
-                file.writelines( data )
-            return data
 
-    # -- function to read field from vtk
-    def loadNumpyFromVtk(self,vtkName):
-        reader = vtk.vtkGenericDataObjectReader()
-        reader.SetFileName(vtkName)
-        reader.Update()
-
-        # Get vtkPolyData object from reader
-        polydata = reader.GetOutput()
-
-        # Get cell data array from p2c
-        fields = []
-        for fieldI in range(len(self.procFields)):
-            fields.append(np.array(polydata.GetCellData().GetArray(self.procFields[fieldI])))
-        
-        return fields
-
-    # -- function to read points of field from vtk
-    def loadPointsFromVTK(self,vtkName):
-        reader = vtk.vtkGenericDataObjectReader()
-        reader.SetFileName(vtkName)
-        reader.Update()
-
-        data = reader.GetOutput()
-        cell_Iterator = data.NewCellIterator()
-        pointsInds = []
-        while cell_Iterator:
-            cellID = cell_Iterator.GetCellId()
-            cellData = data.GetCell(cellID)
-            cell_Iterator.GoToNextCell()
-
-        return pts
-
-    # -- function to calculate indices for flipping the field
+    # -- function to calculate weighting matrix for flipping the field
     def loadIndicesForFlipping(self, flip_axis = [1, -1, 1],plochaName = "plochaHor.vtk"):
         # -- load source field
         reader = vtk.vtkGenericDataObjectReader()
@@ -375,59 +135,106 @@ class OpenFoamData:
         
         # -- locator in the target mesh 
         locator = vtk.vtkPointLocator()
-        locator.SetDataSet(target)
+        locatocellIndTur.SetDataSet(target)
         locator.BuildLocator()
         
         # -- cells in target mesh 
         cellsOld = np.array(target.GetPolys().GetData()).reshape(target.GetNumberOfCells(),-1)[:,1:]
         
         # -- find indexes that transform into new one after flipping
-        indexes = np.zeros(source.GetNumberOfCells())
+        nOfCells = source.GetNumberOfCells()
+        Wf = np.zeros((nOfCells,nOfCells))
         closestPoint = np.empty((3,3))
-        for i in range(source.GetNumberOfCells()):
+        for i in range(nOfCells):
             # -- for each cell in source find where it is in new vtk
             cell = source.GetCell(i)
+            # if i % int(nOfCells/10) == 0:
+            #     print('Working on cell %d/%d'%(i,nOfCells))
             if isinstance(cell, vtk.vtkTriangle):
                 cellPoints = cell.GetPoints()
                 for j in range(cell.GetNumberOfPoints()):
                     closestPoint[j,:] = cellPoints.GetPoint(j)
                 clPointLst = np.array([locator.FindClosestPoint(closestPoint[i,:]) for i in range(3)])
-                cellsInTarget = np.where(cellsOld == np.array([clPointLst[j]]))[0]
+                cellsInTarget = np.where(cellsOld == np.array([clPointLst[0]]))[0]
                 for j in range(2):
                     cellIndTu = np.where(cellsOld == np.array([clPointLst[j+1]]))[0]
                     cellsInTarget = np.intersect1d(cellIndTu, cellsInTarget)
                 try:
                     closestPointId = cellsInTarget[0]
+                    if cellsInTarget.size != 1:
+                        print('Cell %d not 1 cells in target %s'%(i,str(cellsInTarget)))
+                    Wf[i,closestPointId] = 1
                 except:
-                    print('Chyba:\n\tbod:', i)
-                    try:
-                        closestPointId = cellIndTu[0]
-                    except:
-                        pass
-                indexes[i] = closestPointId
+                    # -- for cells that have points in flipped mesh
+                    # -- I will find all cells that have points of the original mesh near the found points of the flipped mesh and interpolate from these cells 
+                    print('Cell %d not found' % i)
+                    # if np.size(cellIndTu) != 0:
+                        # print('Found inds of point%s'%str(clPointLst))
+                    allCells = np.empty((0)).astype(int)
+                    for j in range(clPointLst.shape[0]):
+                        # allCells = np.append(allCells,np.where(cellsOld == np.array([clPointLst[j+1]]))[0],axis=0)
+                        allCells = np.append(allCells,np.where(cellsOld == np.array([clPointLst[j]]))[0][:],axis=0)
+                    allCells = np.unique(allCells)
+                    # print('Found cells to interpolate from: %s'%str(allCells))
+                    # -- find center of the current cell 
+                    centroidCell = centroidTriangle(closestPoint[0,:], closestPoint[1,:], closestPoint[2,:])
+                    # print('ClosestPoint %s, centroid %s' %(str(closestPoint), str(centroidCell)))
+                    norms = np.zeros((allCells.shape))
+                    for j in range(allCells.shape[0]):
+                        targetCell = target.GetCell(allCells[j]).GetPoints()
+                        targetCellPts = np.array(targetCell.GetPoint(0)), \
+                                        np.array(targetCell.GetPoint(1)), \
+                                        np.array(targetCell.GetPoint(2))
+                        targetCentroid = centroidTriangle(*targetCellPts)
+                        norms[j] = np.linalg.norm(targetCentroid-centroidCell)
+                    norms = norms / np.linalg.norm(norms)
+                    norms = norms / np.sum(norms)
+                    for j in range(allCells.shape[0]): 
+                        Wf[i, allCells[j]] = norms[j]
             else:
                 print('Cell is not triangle.')
-        print(indexes)
-        print('Saving indexes with shape %s'%str(indexes.shape))
-        np.save('%s/indexes_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]),indexes)
+        print('Saving weighting matrix with shape %s'%str(Wf.shape))
+        np.save('%s/Wf_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]),Wf)
+        return Wf
 
     # -- function to run symmetric and anytisymetric POD
     def UsymUAsym(self, UBox, plochaName = "plochaHor.vtk",onlyXY=False,indFromFile=False):
         if onlyXY:
             self.loadVTKandTimeLst(plochaName = plochaName)
             if indFromFile:
-                indices = np.load('%s/indexes_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]))
-                print('Loading indexes with shape %s'%str(indices.shape))
+                Wf = np.load('%s/Wf_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]))
+                print('Loading weighting matrix with shape %s'%str(Wf.shape))
             else:
-                indices = self.loadIndicesForFlipping(plochaName = plochaName)
-            indices = indices.astype(int)
+                Wf = self.loadIndicesForFlipping(plochaName = plochaName)
+            print('Norm of the weighting matrix %g'%(np.linalg.norm(Wf)))
+            sWf = sparse.csr_matrix(Wf)
             USym = np.zeros((UBox.shape))
             UASym = np.zeros((UBox.shape))
+            # UFl = np.zeros((UBox.shape))
             for colI in range(UBox.shape[1]):
                 UTu = UBox[:,colI].reshape((-1,2))
-                USym[:, colI] = ((UTu + np.array([1,-1]) *UTu[indices])/2).reshape(-1)
-                UASym[:, colI] = ((UTu + np.array([-1,1]) * UTu[indices])/2).reshape(-1)
-        return USym, UASym
+                UFlipped = sWf.dot(UTu)
+                USym[:, colI] = ((UTu + np.array([1,-1]) * UFlipped)/2).reshape(-1)
+                UASym[:, colI] = ((UTu + np.array([-1,1]) * UFlipped)/2).reshape(-1)
+            
+        return USym, UASym #, UFl
+    
+    # -- function to read field from vtk
+    def loadNumpyFromVtk(self,vtkName):
+        # -- prepare vtk reader
+        reader = vtk.vtkGenericDataObjectReader()
+        reader.SetFileName(vtkName)
+        reader.Update()
+
+        # Get vtkPolyData object from reader
+        polydata = reader.GetOutput()
+
+        # Get cell data array from polydata
+        fields = []
+        for fieldI in range(len(self.procFields)):
+            fields.append(np.array(polydata.GetCellData().GetArray(self.procFields[fieldI])))
+        
+        return fields
     
     # -- function to write vtk from numpy fields
     # -- name -- name of the file, fields -- numpy fields to write, template -- template vtk, dest -- directory to store
@@ -529,9 +336,24 @@ class OpenFoamData:
         etaMat   = (PsiBox.T).dot(UBoxTu)
         
         return PsiBox, sBox, etaMat
+    
+    # -- write and vizualize singular values 
+    def writeSingVals(self, singVals, outDir, timeSample, name='singVals'):
+        with open('%s/%d/%s.dat'%(outDir,timeSample,name),'w') as fl:
+            fl.writelines('x\tsingVal\tsingValLomSumasingVal\tsingValsqLomSumasingValsq\n')
+            for j in range(len(singVals)):
+                fl.writelines('%d\t%g\t%g\t%g\n'%(j,singVals[j],singVals[j]/np.sum(singVals),singVals[j]**2/np.sum(singVals**2)))
+        plt.plot(singVals**2/np.sum(singVals**2),label='%d'%timeSample)
+        plt.yscale('log')
+        plt.xscale('log')
+        plt.ylim(10e-5,1)
+        plt.legend()
+        plt.savefig('%s/%d/%s.png'%(outDir,timeSample,name))
+        plt.close()
 
+    # -- NOTETH: legacy  
     # --- function to run PO decomposition
-    def PODold(self, singValsFile = ''):
+    def PODlegacy(self, singValsFile = ''):
         for i in range(len(self.Ys)):
             UBox = np.copy(self.Ys[i])
             for colInd in range(UBox.shape[-1]):
@@ -554,7 +376,7 @@ class OpenFoamData:
                         fl.writelines('%d\t%g\t%g\t%g\n'%(j,self.singVals[-1][j],self.singVals[-1][j]/np.sum(self.singVals[-1]),self.singVals[-1][j]**2/np.sum(self.singVals[-1]**2)))
 
     # --- function to run randomized PO decomposion
-    def rPOD(self,rank = 30, pwr=3,singValsFile = '',comp=True):
+    def rPODlegacy(self,rank = 30, pwr=3,singValsFile = '',comp=True):
         for i in range(len(self.Ys)):
             A = np.copy(self.Ys[i])
             for colInd in range(A.shape[-1]):
@@ -580,20 +402,6 @@ class OpenFoamData:
                         fl.writelines('x\tsingVal\tsingValLomSumasingVal\tsingValsqLomSumasingValsq\tabsRelsingvalMsingvalRND\n')
                         for j in range(len(self.randsingVals[-1])):
                             fl.writelines('%d\t%g\t%g\t%g\t%g\n'%(j,self.randsingVals[-1][j],self.randsingVals[-1][j]/np.sum(self.randsingVals[-1]),self.randsingVals[-1][j]**2/np.sum(self.randsingVals[-1]**2),np.abs(self.singVals[i][j]-self.randsingVals[-1][j])/self.singVals[i][j]))
-
-    # -- write singular values 
-    def writeSingVals(self, singVals, outDir, timeSample, name='singVals'):
-        with open('%s/%d/%s.dat'%(outDir,timeSample,name),'w') as fl:
-            fl.writelines('x\tsingVal\tsingValLomSumasingVal\tsingValsqLomSumasingValsq\n')
-            for j in range(len(singVals)):
-                fl.writelines('%d\t%g\t%g\t%g\n'%(j,singVals[j],singVals[j]/np.sum(singVals),singVals[j]**2/np.sum(singVals**2)))
-        plt.plot(singVals**2/np.sum(singVals**2),label='%d'%timeSample)
-        plt.yscale('log')
-        plt.xscale('log')
-        plt.ylim(10e-5,1)
-        plt.legend()
-        plt.savefig('%s/%d/%s.png'%(outDir,timeSample,name))
-        plt.close()
 
     # vizualize etas
     def vizChronos(self,nChronos = 1,myRange = [0,-1],svFig=''):
@@ -948,4 +756,215 @@ class OpenFoamData:
         # writer.SetInputData(reader.GetOutput())
         writer.SetInputData(tmpl)
         writer.Write()
+      
+    # --- function to read oF file and to return the length of vector and number of cells -- case
+    def getVecLengthCase(self,data):
+        for i in range(len(data)):
+            if data[i].find('internalField') == 0:                          #it is at the line beginning
+                numCells = int(data[i+1])                                   #get number of cells in the mesh
+                try:
+                    start  = data[i+3].rindex( '(' ) + len( '(' )
+                    end    = data[i+3].index( ')', start )
+                    auxVar =  data[i+3][start:end]
+                    return len([float(numStr) for numStr in auxVar.split(' ')]),numCells
+                except ValueError:
+                    return [1,numCells]
 
+    # --- function to read oF file and to return the length of vector and number of cells -- PPS
+    def getVecLengthPPS(self,data):
+        for i in range(len(data)):
+            if data[i].find('CELL_DATA') == 0:                          #it is at the line beginning
+                return int(data[i+2].replace('\n','').split(' ')[1]), int(data[i+2].replace('\n','').split(' ')[2])
+
+    # --- function to read vol(Scalar/Vector)Field from an oF result file
+    def readInternalField(self,data):
+        lV  = self.lenVecsNCells[-1][0]
+        numCells = self.lenVecsNCells[-1][1]
+        for i in range(len(data)):
+            if data[i].find('internalField') == 0 and self.storage == 'case' or data[i].find('CELL_DATA') == 0:     #it is at the line beginning
+                # numCells = int(data[i-2].replace('\n','').split(' ')[1])                                                  #get number of cells in the mesh
+                # auxStr = " ".join(data[i+3:i+4+numCells]).translate(string.maketrans('', ''), '()\n').split(' ')
+                auxStr = " ".join(data[i+3:i+4+numCells]).replace(')','').replace('(','').replace('\n','').split(' ')
+                return np.array([float(numStr) for numStr in auxStr if isFloat(numStr)]).reshape(numCells,lV)
+
+    # --- function to load openfoam data as case option
+    def loadFieldFilesCase(self,field,mkDel = []):
+        with open('%s/%g/%s'%(self.caseDir,self.timeLst[0],field), 'r') as file:
+            data = file.readlines()
+
+        # -- get the output dimensions
+        mkDelTu = mkDel[:]
+        self.lenVecsNCells.append(self.getVecLengthCase(data))
+        nCells = self.lenVecsNCells[-1][1]
+        lenVec = self.lenVecsNCells[-1][0]
+        print('Field %s has %d dimensions in %d cells.' %(field,lenVec,nCells))
+        nTimes = len(self.timeLst)
+        
+        # -- allocate the output variable
+        Y   = np.zeros((nCells,lenVec,nTimes))
+        
+        # -- load the data
+        for i in range(nTimes):
+            print('Reading field %s from time %g'%(field,self.timeLst[i]))
+            Y[:,:,i] = self.readInternalField(data)                              #I have the first data preloaded
+            if i+1 < nTimes:                                                #if there is another file, load it
+                with open('%s/%g/%s'%(self.caseDir,self.timeLst[i+1],field), 'r') as file:
+                    data = file.readlines()
+
+        # -- check for empty dimensions in the data
+        valsNorm = [np.linalg.norm(Y[:,i,:]) for i in range(lenVec)]
+        meanNorm = np.mean(valsNorm)
+        for i in range(lenVec):
+            if valsNorm[i] <= meanNorm/100:
+                mkDelTu.append(i)    
+
+        self.mkDels.append(mkDelTu)
+
+        # -- delete empty dimensions and save the rest
+        Y = np.delete(Y,mkDelTu,1)
+        Y = np.reshape(Y, (Y.shape[0]*Y.shape[1],nTimes))
+        print('I have loaded matrix Y with dimensions %d x %d of the field %s, %s dimension was deleted.'%(Y.shape[0],Y.shape[1],field,mkDelTu))
+        self.Ys.append(Y)
+        # return np.delete(Y,mkDel,1),lenVec,mkDel
+    
+    # --- function to load openfoam data as case PPS option
+    def loadFieldFilesPPS(self,field,plochaName,mkDel = [],onlyXY=False):
+        with open('%s/postProcessing/sample/%g/%s_%s'%(self.caseDir,self.timeLst[0],field,plochaName), 'r') as file:
+            data = file.readlines()
+
+        # -- get the output dimensions
+        mkDelTu = mkDel[:]
+        self.lenVecsNCells.append(self.getVecLengthPPS(data))
+        nCells = self.lenVecsNCells[-1][1]
+        lenVec = self.lenVecsNCells[-1][0]
+        print('Field %s has %d dimensions in %d cells.' %(field,lenVec,nCells))
+        nTimes = len(self.timeLst)
+        
+        # -- allocate the output variable
+        Y   = np.zeros((nCells,lenVec,nTimes))
+        
+        # -- load the data
+        for i in range(nTimes):
+            print('Reading field %s from time %g'%(field,self.timeLst[i]))
+            Y[:,:,i] = self.readInternalField(data)                              #I have the first data preloaded
+            if i+1 < nTimes:                                                #if there is another file, load it
+                # if mista == None:
+                #     with open('%s/postProcessing/sample/%g/%s_%s'%(self.caseDir,self.timeLst[i+1],field,plochaName), 'r') as file:
+                #         data = file.readlines()
+                # else:
+                    # kam = ('%s/postProcessing/sample/%1.'+str(mista)+'f/%s_%s')
+                    # print(self.timeLst[i+1])
+                with open('%s/postProcessing/sample/%s/%s_%s'%(self.caseDir,self.timeLstStr[i+1],field,plochaName), 'r') as file:
+                    data = file.readlines()
+
+        # -- check for empty dimensions in the data
+        valsNorm = [np.linalg.norm(Y[:,i,:]) for i in range(lenVec)]
+        meanNorm = np.mean(valsNorm)
+        for i in range(lenVec):
+            if valsNorm[i] <= meanNorm/100:
+                mkDelTu.append(i)    
+
+        if onlyXY and lenVec > 2:
+            if "Ver" in plochaName:
+                mkDelTu.append(1)
+            mkDelTu.append(2)
+
+        self.mkDels.append(mkDelTu)        
+
+        # -- delete empty dimensions and save the rest
+        Y = np.delete(Y,mkDelTu,1)
+        Y = np.reshape(Y, (Y.shape[0]*Y.shape[1],nTimes))
+        print('I have loaded matrix Y with dimensions %d x %d of the field %s, %s dimension was deleted.'%(Y.shape[0],Y.shape[1],field,mkDelTu))
+        self.Ys.append(Y)
+    
+    # --- function to write fields (at the moment 'case' option works)
+    def writeField(self, field, templateFieldName, fieldName, caseDir, outDir='100',data=[], plochaName = 'plochaHor.vtk'):
+        if self.storage == 'case':
+            if not os.path.exists('%s'%(outDir)):
+                os.makedirs('%s'%(outDir))
+            
+            # -- input field properties
+            procFldInd = self.procFields.index(templateFieldName)
+            mkDel = self.mkDels[procFldInd]
+            nCells = self.lenVecsNCells[procFldInd][1]
+            lenVec = self.lenVecsNCells[procFldInd][0]
+        
+            # -- replace location and object in out file
+            if data == []:
+                with open('%s/%g/%s'%(caseDir, self.timeLst[0], templateFieldName), 'r') as file:
+                    data = file.readlines()
+                    idStr = ['location', 'object']
+                    pVals = [outDir.split('/')[-2],fieldName]
+                    
+                    for j in range(len(idStr)):
+                        for k in range(len(data)):
+                            fInd = data[k].find(idStr[j])
+                            if fInd>-1:
+                                data[k] = data[k][:fInd] + idStr[j] + '\t' + pVals[j] + ';\n'
+                                break
+            
+            print('I am writing field %s with %d cells and %d length of vector.'%(fieldName,nCells,lenVec))
+            field = np.reshape(field,(nCells,lenVec-len(mkDel)))
+            field = np.insert(field,mkDel,0,axis=1)                    
+            # -- write in the data
+            if field.shape[1] == 1:
+                for i in range(len(data)):
+                    if data[i].find('internalField') == 0:                          #it is at the line beginning
+                        for j in range(3,nCells+3):
+                            data[i+j] = '%5.4e\n'%(field[j-3])                  #type will be numpy ndArray
+                        break
+            else:
+                for i in range(len(data)):
+                    if data[i].find('internalField') == 0:                          #it is at the line beginning
+                        for j in range(3,nCells+3):
+                            data[i+j] = '(%5.4e %5.4e %5.4e)\n'%tuple([field[j-3,k] for k in range(lenVec)])
+                        break
+                
+            with open('%s/%s'%(outDir,fieldName), 'w') as file:
+                file.writelines( data )
+            return data
+        elif self.storage == 'PPS':
+            if not os.path.exists('%s'%(outDir)):
+                os.makedirs('%s'%(outDir))
+            
+            # -- input field properties
+            procFldInd = self.procFields.index(templateFieldName)
+            mkDel = self.mkDels[procFldInd]
+            nCells = self.lenVecsNCells[procFldInd][1]
+            lenVec = self.lenVecsNCells[procFldInd][0]
+        
+            # -- replace location and object in out file
+            if data == []:
+                with open(self.vtkFiles[0], 'r') as file:
+                    data = file.readlines()
+            
+            print('I am writing field %s with %d cells and %d length of vector.'%(fieldName,nCells,lenVec))
+            field = np.reshape(field,(nCells,lenVec-len(mkDel)))
+            field = np.insert(field,mkDel,0,axis=1)                    
+            # -- write in the data
+            if field.shape[1] == 1:
+                for i in range(len(data)):
+                    if data[i].find('CELL_DATA') == 0:                          #it is at the line beginning
+                        for j in range(3,int(floor(nCells/10))+3):
+                            data[i+j] = '%5.4e %5.4e %5.4e %5.4e %5.4e %5.4e %5.4e %5.4e %5.4e %5.4e\n'%tuple([field[10*(j-3)+k,0] for k in range(10)])                #type will be numpy ndArray
+                        poslR = ''
+                        for num in range(nCells%10,0,-1):
+                            poslR += '%5.4e '%field[- num,0]
+                        poslR += '\n'
+                        try:
+                            data[i+int(floor(nCells/10))+3] = poslR 
+                        except:
+                            data.append(poslR)
+                        break
+            else:
+                for i in range(len(data)):
+                    if data[i].find('CELL_DATA') == 0:                          #it is at the line beginning
+                        for j in range(3,nCells+3):
+                            data[i+j] = '%5.4e %5.4e %5.4e\n'%tuple([field[j-3,k] for k in range(lenVec)])
+                        break
+                
+            with open('%s/%s_%s.vtk'%(outDir,fieldName,plochaName), 'w') as file:
+                file.writelines( data )
+            return data
+    
+    # -- end of legacy

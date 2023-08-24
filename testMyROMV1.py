@@ -25,7 +25,7 @@ loadFromNumpyFile = True
 onlyXY = True
 # onlyXY = False
 withConv = True
-# withConv = False
+withConv = False
 symFluc = True
 # symFluc = False
 indFromFile = True
@@ -142,9 +142,13 @@ for case in testedCases:
                     
                     # -- test ==> write one fluctulation
                     # fluc0TestWriteSym = np.append(Usym[:,0].reshape(-1,2), np.zeros((Usym[:,0].shape[0]//2,1)), axis =1)
-                    # oFData.writeVtkFromNumpy('fluc0TestWriteSym.vtk', [fluc0TestWriteSym], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                    # oFData.writeVtkFromNumpy('fluc0TestWriteSymV2.vtk', [fluc0TestWriteSym], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/'%(oFData.outDir,newRes,timeSample))
                     # fluc0TestWriteASym = np.append(UAsym[:,0].reshape(-1,2), np.zeros((UAsym[:,0].shape[0]//2,1)), axis =1)
-                    # oFData.writeVtkFromNumpy('fluc0TestWriteASym.vtk', [fluc0TestWriteASym], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                    # oFData.writeVtkFromNumpy('fluc0TestWriteASymV2.vtk', [fluc0TestWriteASym], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/'%(oFData.outDir,newRes,timeSample))
+                    # UFlTu = np.append(UFl[:,0].reshape(-1,2), np.zeros((UFl[:,0].shape[0]//2,1)), axis =1)
+                    # oFData.writeVtkFromNumpy('UFlTuV2.vtk', [UFlTu], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/'%(oFData.outDir,newRes,timeSample))
+                    # UTu = np.append(UBoxTu[:,0].reshape(-1,2), np.zeros((UBoxTu[:,0].shape[0]//2,1)), axis =1)
+                    # oFData.writeVtkFromNumpy('UTuV2.vtk', [UTu], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/'%(oFData.outDir,newRes,timeSample))
                     
                     
                     # -- symmetric/antisymmetric POD and save results

@@ -14,47 +14,55 @@ numpyOutDir = '../ZZ_testNumpy'
 # fieldsOfInt = ['p','U']
 # fieldsOfInt = ['p']
 parallel = False
-fieldsOfInt = ['U','k']
+loadFromNumpyFile = False
+onlyXY = False
+fieldsOfInt = ['U']
 startTime = 0.9
-endTime = 3.9
-plochaNazev="plochaHor3.vtk"
+endTime = 6.0
+plochaNazev="U_plochaHor3.vtk"
 
 storage = 'PPS'
 
 oFData = OpenFoamData(caseOutFolder, startTime, endTime, storage, fieldsOfInt, numpyOutDir)
-oFData.loadTimeLst()
-oFData.loadYsFromNPField()
+# oFData.loadTimeLst()
+
+# -- load data
+if not loadFromNumpyFile:
+    oFData.loadYsFromOFData(plochaName = plochaNazev,onlyXY=onlyXY)
+    oFData.saveYsFromNPField()
+else:
+    oFData.loadYsFromNPField()
 
 # avgDef = np.average(oFData.Ys[0],axis=1)
 # avgDefs = [[2000,3000],[3000,4000],[4000,5000],[5000,6000]]
 # for j in range(len(avgDefs)):
-avgDef = np.average(oFData.Ys[0][:,1000:],axis=1)
-avgRange = [500,1000,2000, 3000, 4000, 5000]
+# avgDef = np.average(oFData.Ys[0][:,1000:],axis=1)
+# avgRange = [500,1000,2000, 3000, 4000, 5000]
 # for j in range(len(avgRange)):
     # rangeT = avgRange[j]
     # avgDef = np.average(oFData.Ys[0][:,1500:1000+rangeT],axis=1)
-avgDef = np.average(oFData.Ys[0][:,1000:6000],axis=1)
+avgDef = np.average(oFData.Ys[0][:,0:9000],axis=1)
 # avgDef = np.average(oFData.Ys[0][:,avgDefs[j][0]:avgDefs[j][1]],axis=1)
 
 # averages = [1000,2000,3000,4000,5000,6000]
 # averages = np.linspace(3500,6000,40).astype(int)
-averages = np.linspace(2000,6000,6).astype(int)
+averages = np.linspace(2000,9000,9).astype(int)
 normErr = np.zeros(len(averages))
 for i in range(len(averages)):
     # avg = np.average(oFData.Ys[0][:,3000:averages[i]],axis=1)
     # avg = np.average(oFData.Ys[0][:,1000:averages[i]],axis=1)
-    avg = np.average(oFData.Ys[0][:,averages[i]-1000:averages[i]],axis=1)
+    avg = np.average(oFData.Ys[0][:,0:averages[i]],axis=1)
     print(i,np.linalg.norm(avg-avgDef))
     normErr[i] = np.linalg.norm(avg-avgDef)
 
-    U_avg = np.reshape(avg,(-1,3))
-    U_act = np.reshape(oFData.Ys[0][:,averages[i]-1000:averages[i]],(-1,3,1000))
-    print(U_avg.shape,U_act.shape)
-    kFromU = np.zeros((U_avg.shape[0],1000))
-    for j in range(U_avg.shape[0]):
-        kFromU[j,:] = (((U_avg[j,0] - U_act[j,0,:]))**2 + ((U_avg[j,1] - U_act[j,1,:]))**2 + ((U_avg[j,2] - U_act[j,2,:]))**2)/2
-    kFromU_avg = np.average(kFromU,axis=1)
-    print(kFromU_avg.shape)
+    # U_avg = np.reshape(avg,(-1,3))
+    # U_act = np.reshape(oFData.Ys[0][:,averages[i]-1000:averages[i]],(-1,3,1000))
+    # print(U_avg.shape,U_act.shape)
+    # kFromU = np.zeros((U_avg.shape[0],1000))
+    # for j in range(U_avg.shape[0]):
+    #     kFromU[j,:] = (((U_avg[j,0] - U_act[j,0,:]))**2 + ((U_avg[j,1] - U_act[j,1,:]))**2 + ((U_avg[j,2] - U_act[j,2,:]))**2)/2
+    # kFromU_avg = np.average(kFromU,axis=1)
+    # print(kFromU_avg.shape)
 
 # plt.plot(averages[:-1],normErr)
 
@@ -63,21 +71,21 @@ for i in range(len(averages)):
         avg[:],
         fieldsOfInt[0],
         # 'avg_%d_%d'%(1000,averages[i]),
-        'avg_%d_%d'%(averages[i]-1000,averages[i]),
+        'avg_%d_%d'%(0,averages[i]),
         caseOutFolder,
         outDir='%s/avgs_Hor_VTK_test/' % (numpyOutDir),
         plochaName = plochaNazev
     )
     # k write
-    oFData.writeField(
-        kFromU_avg[:],
-        'k',
-        # 'avg_%d_%d'%(1000,averages[i]),
-        'k_avg_%d_%d'%(averages[i]-1000,averages[i]),
-        caseOutFolder,
-        outDir='%s/avgs_Hor_VTK_test/' % (numpyOutDir),
-        plochaName = plochaNazev
-    )
+    # oFData.writeField(
+    #     kFromU_avg[:],
+    #     'k',
+    #     # 'avg_%d_%d'%(1000,averages[i]),
+    #     'k_avg_%d_%d'%(averages[i]-1000,averages[i]),
+    #     caseOutFolder,
+    #     outDir='%s/avgs_Hor_VTK_test/' % (numpyOutDir),
+    #     plochaName = plochaNazev
+    # )
 
 # plt.plot(averages[:-1],normErr,label='%d'%rangeT)
 # plt.legend()

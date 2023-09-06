@@ -7,14 +7,15 @@ from scipy import signal
 # -- information about case
 # testedCases = ['./meshInSt/mS_40p','./meshInSt/mS_50p','./meshInSt/mS_75p','./meshInSt/mS_120p']
 testedCases = ['../bCyl_l_3V3']
-timeSamples = np.linspace(3000,9000,3).astype(int)
+timeSamples = np.linspace(3000,10600,3).astype(int)
 # timeSamples = [500]
 startTime = 0.9
-endTime = 1.9
-endTime = 6
+# endTime = 1.0
+endTime = 6.8
 storage = 'PPS'
 procFields = ['U']
 plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0]]
+plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0], "%s_plochaVer.vtk" % procFields[0]]
 nameOfTheResultsFolder = 'flowAnalysisPy'
 
 # -- what to do?
@@ -23,13 +24,13 @@ takePODmatricesFromFiles = False
 loadFromNumpyFile = True
 # loadFromNumpyFile = False
 onlyXY = True
-# onlyXY = False
+onlyXY = False
 withConv = True
 withConv = False
 symFluc = True
 # symFluc = False
 indFromFile = True
-# indFromFile = False
+indFromFile = False
 
 # -- writing stuff 
 nModes = 60
@@ -173,7 +174,7 @@ for case in testedCases:
                     np.save('%s/%s/%d/chronos.npy'%(outDir,newRes,timeSample),chronos)
                     
                     # -- write singular values 
-                    oFData.writeSingVals(singValsSym,'%s/%s'%(outDir,newRes), timeSample, name='singVals')
+                    oFData.writeSingVals(singVals,'%s/%s'%(outDir,newRes), timeSample, name='singVals')
             
             # -- load POD stuff from file
             else:
@@ -198,14 +199,14 @@ for case in testedCases:
                     else:
                         prepWriteSym = modesSym[:,i].reshape(-1,3)
                         prepWriteASym = modesASym[:,i].reshape(-1,3)
-                    oFData.writeVtkFromNumpy('mode%dSym.vtk'%(i+1), [prepWriteSym], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
-                    oFData.writeVtkFromNumpy('mode%dASym.vtk'%(i+1), [prepWriteASym], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                    oFData.writeVtkFromNumpy('mode%dSym.vtk'%(i+1), [prepWriteSym], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                    oFData.writeVtkFromNumpy('mode%dASym.vtk'%(i+1), [prepWriteASym], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
                 else:
                     if onlyXY:
                         prepWrite = np.append(modes[:,i].reshape(-1,2), np.zeros((modes[:,i].shape[0]//2,1)), axis =1)
                     else:
                         prepWrite = modes[:,i].reshape(-1,3)
-                    oFData.writeVtkFromNumpy('mode%d.vtk'%(i+1), [prepWrite], '%s/postProcessing/sample/3.90006723/U_plochaHor3.vtk'%oFData.caseDir, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                    oFData.writeVtkFromNumpy('mode%d.vtk'%(i+1), [prepWrite], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
 
         # -- convergence of modes and mean values
         # errModes = np.empty((0,modesToComp))

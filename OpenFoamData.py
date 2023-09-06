@@ -135,7 +135,7 @@ class OpenFoamData:
         
         # -- locator in the target mesh 
         locator = vtk.vtkPointLocator()
-        locatocellIndTur.SetDataSet(target)
+        locator.SetDataSet(target)
         locator.BuildLocator()
         
         # -- cells in target mesh 
@@ -199,23 +199,28 @@ class OpenFoamData:
 
     # -- function to run symmetric and anytisymetric POD
     def UsymUAsym(self, UBox, plochaName = "plochaHor.vtk",onlyXY=False,indFromFile=False):
-        if onlyXY:
-            self.loadVTKandTimeLst(plochaName = plochaName)
-            if indFromFile:
-                Wf = np.load('%s/Wf_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]))
-                print('Loading weighting matrix with shape %s'%str(Wf.shape))
-            else:
-                Wf = self.loadIndicesForFlipping(plochaName = plochaName)
-            print('Norm of the weighting matrix %g'%(np.linalg.norm(Wf)))
-            sWf = sparse.csr_matrix(Wf)
-            USym = np.zeros((UBox.shape))
-            UASym = np.zeros((UBox.shape))
-            # UFl = np.zeros((UBox.shape))
-            for colI in range(UBox.shape[1]):
+        self.loadVTKandTimeLst(plochaName = plochaName)
+        if indFromFile:
+            Wf = np.load('%s/Wf_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]))
+            print('Loading weighting matrix with shape %s'%str(Wf.shape))
+        else:
+            Wf = self.loadIndicesForFlipping(plochaName = plochaName)
+        print('Norm of the weighting matrix %g'%(np.linalg.norm(Wf)))
+        sWf = sparse.csr_matrix(Wf)
+        USym = np.zeros((UBox.shape))
+        UASym = np.zeros((UBox.shape))
+        # UFl = np.zeros((UBox.shape))
+        for colI in range(UBox.shape[1]):
+            if onlyXY:
                 UTu = UBox[:,colI].reshape((-1,2))
                 UFlipped = sWf.dot(UTu)
                 USym[:, colI] = ((UTu + np.array([1,-1]) * UFlipped)/2).reshape(-1)
                 UASym[:, colI] = ((UTu + np.array([-1,1]) * UFlipped)/2).reshape(-1)
+            else:
+                UTu = UBox[:,colI].reshape((-1,3))
+                UFlipped = sWf.dot(UTu)
+                USym[:, colI] = ((UTu + np.array([1,-1,1]) * UFlipped)/2).reshape(-1)
+                UASym[:, colI] = ((UTu + np.array([-1,1,-1]) * UFlipped)/2).reshape(-1)
             
         return USym, UASym #, UFl
     

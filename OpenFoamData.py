@@ -344,16 +344,18 @@ class OpenFoamData:
     
     # -- write and vizualize singular values 
     def writeSingVals(self, singVals, outDir, timeSample, name='singVals'):
-        with open('%s/%d/%s.dat'%(outDir,timeSample,name),'w') as fl:
+        if not os.path.exists('%s/%s'%(outDir,str(timeSample))):             
+            os.makedirs('%s/%s'%(outDir,str(timeSample)))
+        with open('%s/%s/%s.dat'%(outDir,str(timeSample),name),'w') as fl:
             fl.writelines('x\tsingVal\tsingValLomSumasingVal\tsingValsqLomSumasingValsq\n')
             for j in range(len(singVals)):
                 fl.writelines('%d\t%g\t%g\t%g\n'%(j,singVals[j],singVals[j]/np.sum(singVals),singVals[j]**2/np.sum(singVals**2)))
-        plt.plot(singVals**2/np.sum(singVals**2),label='%d'%timeSample)
+        plt.plot(singVals**2/np.sum(singVals**2),label='%s'%str(timeSample))
         plt.yscale('log')
         plt.xscale('log')
         plt.ylim(10e-5,1)
         plt.legend()
-        plt.savefig('%s/%d/%s.png'%(outDir,timeSample,name))
+        plt.savefig('%s/%s/%s.png'%(outDir,str(timeSample),name))
         plt.close()
 
     # -- NOTETH: legacy  

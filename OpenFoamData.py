@@ -355,6 +355,12 @@ class OpenFoamData:
         plt.legend()
         plt.savefig('%s/%d/%s.png'%(outDir,timeSample,name))
         plt.close()
+    
+    # -- write and vizualize chronos spectra 
+    def writeChronosSpectra(self, chronos, outDir, timeSample, nModes=60):
+        print(chronos.shape)
+        # for i in range(chronos.shape[1]):
+            
 
     # -- NOTETH: legacy  
     # --- function to run PO decomposition

@@ -9,6 +9,7 @@ from math import floor
 import vtk
 from multiprocessing import Pool
 from scipy import sparse
+from scipy import signal
 # import pyrennModV3 as prn
 
 # -- custom function
@@ -359,12 +360,47 @@ class OpenFoamData:
         plt.close()
     
     # -- write and vizualize chronos spectra 
-    def writeChronosSpectra(self, chronos, outDir, timeSample, nModes=60):
-        print(chronos.shape)
-        # for i in range(chronos.shape[1]):
+    def writeChronosSpectra(self, chronos, outDir, timeSample, name, nModes=60):
+        if not os.path.exists('%s/%s/chronosSpectra/'%(outDir,str(timeSample))):             
+            os.makedirs('%s/%s/chronosSpectra/'%(outDir,str(timeSample)))
+        for i in range(nModes):
+            print('Writing spectra of chronos %d'%(i+1))
+            UyTu = chronos[i,:]
+            yFFT = (np.abs(np.fft.fft(UyTu))/UyTu.shape)**2
+            xFFT = np.linspace(0, 1./(2*0.0005), UyTu.shape[0]//2+1)
+            window = signal.windows.hamming(10)
+            cutYFFT = yFFT[:UyTu.shape[0]//2+1]
+            yFFT = np.convolve(cutYFFT,window,'same')
+            yFFT = yFFT/np.max(yFFT)
+            xKolm = np.linspace(70,300,2)
+            yKolm =  1000* (xKolm)**(-5/3)
+            xKraich = np.linspace(300,1000,2)
+            yKraich =  1000*(xKraich)**(-3)
+            plt.plot(xFFT,(yFFT))
+            plt.plot(xKolm,yKolm,'--')
+            plt.plot(xKraich,yKraich,'--')
+            plt.xscale('log')
+            plt.yscale('log')
+            plt.xlim(1,1e3)
+            plt.grid()
+            plt.savefig('%s/%s/chronosSpectra/%s_%d.png'%(outDir,str(timeSample),name,(i+1)))
+            plt.close()
+            np.savetxt('%s/%s/chronosSpectra/%s_%d.dat'%(outDir,str(timeSample),name,(i+1)), np.append(xFFT.reshape(-1,1),yFFT.reshape(-1,1), axis=1), header='freq sptra',comments='')
+    
+    # -- write and vizualize phase diagrams
+    def phaseDiagrams(self, chronos, outDir, timeSample, name, nModes=60):
+        if not os.path.exists('%s/%s/phaseDiagrams/'%(outDir,str(timeSample))):             
+            os.makedirs('%s/%s/phaseDiagrams/'%(outDir,str(timeSample)))
+        for i in range(nModes):
+            print('Writing phaseDiagrams %d'%(i+1))
+            chron1 = chronos[i,11000:]/np.max(chronos[i,11000:])
+            chron2 = chronos[i+1,11000:]/np.max(chronos[i+1,11000:])
+            plt.plot(chron1,chron2)
+            plt.savefig('%s/%s/phaseDiagrams/%s_%d.png'%(outDir,str(timeSample),name,(i+1)))
+            plt.close()
             
 
-    # -- NOTETH: legacy  
+    # -- NOTETH: legacy  --------------------------------------------------------------------------------------------------------------------------
     # --- function to run PO decomposition
     def PODlegacy(self, singValsFile = ''):
         for i in range(len(self.Ys)):

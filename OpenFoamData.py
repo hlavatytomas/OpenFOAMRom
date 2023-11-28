@@ -360,12 +360,12 @@ class OpenFoamData:
         plt.close()
     
     # -- write and vizualize chronos spectra 
-    def writeChronosSpectra(self, chronos, outDir, timeSample, name, nModes=60):
+    def writeChronosSpectra(self, chronos, outDir, timeSample, name, nModes=60,timesToUse=-1):
         if not os.path.exists('%s/%s/chronosSpectra/'%(outDir,str(timeSample))):             
             os.makedirs('%s/%s/chronosSpectra/'%(outDir,str(timeSample)))
         for i in range(nModes):
             print('Writing spectra of chronos %d'%(i+1))
-            UyTu = chronos[i,:]
+            UyTu = chronos[i,:timesToUse]
             yFFT = (np.abs(np.fft.fft(UyTu))/UyTu.shape)**2
             xFFT = np.linspace(0, 1./(2*0.0005), UyTu.shape[0]//2+1)
             window = signal.windows.hamming(10)
@@ -381,7 +381,8 @@ class OpenFoamData:
             plt.plot(xKraich,yKraich,'--')
             plt.xscale('log')
             plt.yscale('log')
-            plt.xlim(1,1e3)
+            print()
+            # plt.xlim(1,1e3)
             plt.grid()
             plt.savefig('%s/%s/chronosSpectra/%s_%d.png'%(outDir,str(timeSample),name,(i+1)))
             plt.close()

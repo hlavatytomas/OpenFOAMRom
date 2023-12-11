@@ -19,7 +19,7 @@ endTime = 7.8
 storage = 'PPS'
 procFields = ['U']
 plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0]]
-# plochaNazevLst = ["%s_plochaVer.vtk" % procFields[0]]
+plochaNazevLst = ["%s_plochaVer.vtk" % procFields[0]]
 # plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0], "%s_plochaVer.vtk" % procFields[0]]
 nameOfTheResultsFolder = 'flowAnalysisPy'
 
@@ -36,14 +36,13 @@ symFluc = True
 # symFluc = False
 indFromFile = True
 # indFromFile = False
-# flipDirs = ['y','z']
-flipDirs = []
+flipDirs = ['y','z']
+# flipDirs = []
 prepareK = True
 # prepareK = False
 makeSpectraChronos = True
 writeModes = False
 writeModes = True
-mergeSingVals = True
 
 # -- writing stuff 
 nModes = 60
@@ -288,19 +287,13 @@ for case in testedCases:
                     if flipDirs == []:
                         oFData.writeChronosSpectra(chronosASym, '%s/%s'%(outDir,newRes), timeSample, 'etaASymSpct',nModes=nModes)
                         oFData.writeChronosSpectra(chronosSym, '%s/%s'%(outDir,newRes), timeSample, 'etaSymSpct',nModes=nModes)
-                        # oFData.phaseDiagrams(chronosASym, '%s/%s'%(outDir,newRes), timeSample, 'etaEtaASymSpct',nModes=nModes)
-                        # oFData.phaseDiagrams(chronosSym, '%s/%s'%(outDir,newRes), timeSample, 'etaSymSpct',nModes=nModes)
                     else:
                         oFData.writeChronosSpectra(chronosSymSym, '%s/%s'%(outDir,newRes), timeSample, 'etaSymSymSpct',nModes=nModes)
                         oFData.writeChronosSpectra(chronosSymASym, '%s/%s'%(outDir,newRes), timeSample, 'etaSymASymSpct',nModes=nModes)
                         oFData.writeChronosSpectra(chronosASymSym, '%s/%s'%(outDir,newRes), timeSample, 'etaASymSymSpct',nModes=nModes)
-                        oFData.writeChronosSpectra(chronosASymASym, '%s/%s'%(outDir,newRes), timeSample, 'etaASymASymSpct',nModes=nModes)v
-                        
-            
-            # -- merge singular values 
-            if mergeSingVals:
-                
-
+                        oFData.writeChronosSpectra(chronosASymASym, '%s/%s'%(outDir,newRes), timeSample, 'etaASymASymSpct',nModes=nModes)
+                    # oFData.phaseDiagrams(chronosASym, '%s/%s'%(outDir,newRes), timeSample, 'etaEtaASymSpct',nModes=nModes)
+                    # oFData.phaseDiagrams(chronosSym, '%s/%s'%(outDir,newRes), timeSample, 'etaSymSpct',nModes=nModes)
             
         # -- convergence of modes and mean values
         # errModes = np.empty((0,modesToComp))

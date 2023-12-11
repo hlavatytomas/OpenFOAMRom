@@ -117,7 +117,8 @@ class OpenFoamData:
         print('I have loaded nCells and lenVec vals as %s.'%str(self.lenVecsNCells))
 
     # -- function to calculate weighting matrix for flipping the field
-    def loadIndicesForFlipping(self, flip_axis = [1, -1, 1],plochaName = "plochaHor.vtk"):
+    # def loadIndicesForFlipping(self, flip_axis = [1, -1, 1],plochaName = "plochaHor.vtk",flipDir=''):
+    def loadIndicesForFlipping(self, flip_axis = [1, 1, -1],translate = [0, 0, 0],plochaName = "plochaHor.vtk",flipDir=''):
         # -- load source field
         reader = vtk.vtkGenericDataObjectReader()
         reader.SetFileName(self.vtkFiles[0])
@@ -129,10 +130,26 @@ class OpenFoamData:
         flip_filter = vtk.vtkTransformFilter()
         flip_transform = vtk.vtkTransform()
         flip_transform.Scale(flip_axis[0], flip_axis[1], flip_axis[2])
+        flip_transform.Translate(translate[0],translate[1],translate[2])
         flip_filter.SetTransform(flip_transform)
         flip_filter.SetInputData(data)
         flip_filter.Update()
         target = flip_filter.GetOutput()
+        
+        # testWrite
+        # print('Writing test file')
+        # writer = vtk.vtkGenericDataObjectWriter()
+        # writer.SetFileName('testWriteBase.vtk')
+        # # writer.SetInputData(reader.GetOutput())
+        # writer.SetInputData(source)
+        # writer.Write()
+        
+        # print('Writing test file')
+        # writer = vtk.vtkGenericDataObjectWriter()
+        # writer.SetFileName('testWriteFlipp.vtk')
+        # # writer.SetInputData(reader.GetOutput())
+        # writer.SetInputData(target)
+        # writer.Write()
         
         # -- locator in the target mesh 
         locator = vtk.vtkPointLocator()
@@ -195,35 +212,78 @@ class OpenFoamData:
             else:
                 print('Cell is not triangle.')
         print('Saving weighting matrix with shape %s'%str(Wf.shape))
-        np.save('%s/Wf_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]),Wf)
+        if flipDir == '':
+            np.save('%s/Wf_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]),Wf)
+        else:
+            np.save('%s/Wf_%s_folding_%s.npy' %(self.outDir, plochaName.split('.vtk')[0],flipDir),Wf)
         return Wf
 
     # -- function to run symmetric and anytisymetric POD
-    def UsymUAsym(self, UBox, plochaName = "plochaHor.vtk",onlyXY=False,indFromFile=False):
+    def UsymUAsym(self, UBox, plochaName = "plochaHor.vtk",onlyXY=False,indFromFile=False,flipDirs=[]):
         self.loadVTKandTimeLst(plochaName = plochaName)
-        if indFromFile:
-            Wf = np.load('%s/Wf_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]))
-            print('Loading weighting matrix with shape %s'%str(Wf.shape))
-        else:
-            Wf = self.loadIndicesForFlipping(plochaName = plochaName)
-        print('Norm of the weighting matrix %g'%(np.linalg.norm(Wf)))
-        sWf = sparse.csr_matrix(Wf)
-        USym = np.zeros((UBox.shape))
-        UASym = np.zeros((UBox.shape))
-        # UFl = np.zeros((UBox.shape))
-        for colI in range(UBox.shape[1]):
-            if onlyXY:
-                UTu = UBox[:,colI].reshape((-1,2))
-                UFlipped = sWf.dot(UTu)
-                USym[:, colI] = ((UTu + np.array([1,-1]) * UFlipped)/2).reshape(-1)
-                UASym[:, colI] = ((UTu + np.array([-1,1]) * UFlipped)/2).reshape(-1)
+        if flipDirs == []:
+            if indFromFile:
+                Wf = np.load('%s/Wf_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]))
+                print('Loading weighting matrix with shape %s'%str(Wf.shape))
             else:
+                Wf = self.loadIndicesForFlipping(plochaName = plochaName,flipDir='')
+            print('Norm of the weighting matrix %g'%(np.linalg.norm(Wf)))
+            sWf = sparse.csr_matrix(Wf)
+            USym = np.zeros((UBox.shape))
+            UASym = np.zeros((UBox.shape))
+            # UFl = np.zeros((UBox.shape))
+            for colI in range(UBox.shape[1]):
+                if onlyXY:
+                    UTu = UBox[:,colI].reshape((-1,2))
+                    UFlipped = sWf.dot(UTu)
+                    USym[:, colI] = ((UTu + np.array([1,-1]) * UFlipped)/2).reshape(-1)
+                    UASym[:, colI] = ((UTu + np.array([-1,1]) * UFlipped)/2).reshape(-1)
+                else:
+                    UTu = UBox[:,colI].reshape((-1,3))
+                    UFlipped = sWf.dot(UTu)
+                    USym[:, colI] = ((UTu + np.array([1,-1,1]) * UFlipped)/2).reshape(-1)
+                    UASym[:, colI] = ((UTu + np.array([-1,1,-1]) * UFlipped)/2).reshape(-1)
+            return USym, UASym
+        else:
+            Wf = []
+            for i in range(len(flipDirs)):
+                if indFromFile:
+                    Wf.append(np.load('%s/Wf_%s_folding_%s.npy' %(self.outDir, plochaName.split('.vtk')[0],flipDirs[i])))
+                    print('Loading weighting matrix with shape %s'%str(Wf[-1].shape))
+                else:
+                    if 'y' == flipDirs[i]:
+                        Wf.append(self.loadIndicesForFlipping(plochaName = plochaName,flip_axis=[1, -1, 1],flipDir=flipDirs[i]))    
+                    elif 'z' == flipDirs[i]:
+                        Wf.append(self.loadIndicesForFlipping(plochaName = plochaName,flip_axis=[1, 1, -1], translate=[0, 0, -0.25],flipDir=flipDirs[i]))  
+            sWf = []
+            for i in range(len(Wf)):
+                sWf.append(sparse.csr_matrix(Wf[i]))
+            print('Prepared sparse matrices')
+            USym = np.zeros((UBox.shape))
+            UASym = np.zeros((UBox.shape))
+            for colI in range(UBox.shape[1]):
                 UTu = UBox[:,colI].reshape((-1,3))
-                UFlipped = sWf.dot(UTu)
+                UFlipped = sWf[0].dot(UTu)
                 USym[:, colI] = ((UTu + np.array([1,-1,1]) * UFlipped)/2).reshape(-1)
                 UASym[:, colI] = ((UTu + np.array([-1,1,-1]) * UFlipped)/2).reshape(-1)
             
-        return USym, UASym #, UFl
+            USymSym = np.zeros((UBox.shape))
+            USymASym = np.zeros((UBox.shape))
+            UASymSym = np.zeros((UBox.shape))
+            UASymASym = np.zeros((UBox.shape))
+            for colI in range(UBox.shape[1]):
+                UTu = USym[:,colI].reshape((-1,3))
+                UFlipped = sWf[1].dot(UTu)
+                USymSym[:, colI] = ((UTu + np.array([1,-1,1]) * UFlipped)/2).reshape(-1)
+                USymASym[:, colI] = ((UTu + np.array([-1,1,-1]) * UFlipped)/2).reshape(-1)
+            
+            for colI in range(UBox.shape[1]):
+                UTu = UASym[:,colI].reshape((-1,3))
+                UFlipped = sWf[1].dot(UTu)
+                UASymSym[:, colI] = ((UTu + np.array([1,-1,1]) * UFlipped)/2).reshape(-1)
+                UASymASym[:, colI] = ((UTu + np.array([-1,1,-1]) * UFlipped)/2).reshape(-1)
+            
+            return USymSym, USymASym, UASymSym, UASymASym
     
     # -- function to read field from vtk
     def loadNumpyFromVtk(self,vtkName):
@@ -368,7 +428,7 @@ class OpenFoamData:
             UyTu = chronos[i,:timesToUse]
             yFFT = (np.abs(np.fft.fft(UyTu))/UyTu.shape)**2
             xFFT = np.linspace(0, 1./(2*0.0005), UyTu.shape[0]//2+1)
-            window = signal.windows.hamming(10)
+            window = signal.windows.hamming(5)
             cutYFFT = yFFT[:UyTu.shape[0]//2+1]
             yFFT = np.convolve(cutYFFT,window,'same')
             yFFT = yFFT/np.max(yFFT)

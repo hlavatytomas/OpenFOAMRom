@@ -12,12 +12,14 @@
 #SBATCH -n1
 # Do NOT use some nodes
 ##SBATCH --exclude=kraken-m[1-7,9]
-##SBATCH --nodelist=kraken-m9
+#SBATCH --nodelist=kraken-m8
 ##sbatch --nodes=1
 
 # run testForAda on kraken
 # python3 -u testForAda.py > log.testForAda
 # python3 -u seeOdtrzeni.py > log.seeOdtrzeni
 # python3 -u testMyROMV1.py > logs/log.hor230828
-python3 -u testMyROMV1.py > logs/log.ver230828
+# python3 -u testMyROMV1.py > logs/log.ver230828
+# python3 -u testMyROMV1.py > logs/log.hor231027
+python3 -u testMyROMV1Ver.py > logs/log.verPOD231108
 # python3 -u testMyROMV1.py > log.avgTopVer

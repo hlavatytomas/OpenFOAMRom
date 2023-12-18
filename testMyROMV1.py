@@ -8,14 +8,14 @@ from scipy import signal
 # testedCases = ['./meshInSt/mS_40p','./meshInSt/mS_50p','./meshInSt/mS_75p','./meshInSt/mS_120p']
 testedCases = ['../bCyl_l_3V3']
 timeSamples = np.linspace(3000,10600,3).astype(int)
-timeSamples = np.linspace(3000,12316,3).astype(int)
-# timeSamples = [10600]
+# timeSamples = np.linspace(3000,12316,3).astype(int)
+timeSamples = [10600]
 # timeSamples = [12316]
 # timeSamples = [500]
 startTime = 0.9
 # endTime = 1.0
-endTime = 7.8
-# endTime = 6.8
+# endTime = 7.8
+endTime = 6.8
 storage = 'PPS'
 procFields = ['U']
 plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0]]
@@ -29,7 +29,7 @@ takePODmatricesFromFiles = True
 loadFromNumpyFile = True
 # loadFromNumpyFile = False
 onlyXY = True
-onlyXY = False
+# onlyXY = False
 withConv = True
 withConv = False
 symFluc = True
@@ -39,11 +39,13 @@ indFromFile = True
 # flipDirs = ['y','z']
 flipDirs = []
 prepareK = True
-# prepareK = False
+prepareK = False
 makeSpectraChronos = True
+# makeSpectraChronos = False
 writeModes = False
-writeModes = True
-mergeSingVals = True
+# writeModes = True
+# mergeSingVals = True
+mergeSingVals = False
 
 # -- writing stuff 
 nModes = 60
@@ -111,8 +113,8 @@ for case in testedCases:
                     YCol = UBoxTu[:,colInd].reshape(-1,3)
                     # print(YCol)
                     YFluc = (YCol-UBoxTuAvg.reshape(-1,3))/5
-                    # k += 0.5*(YFluc[:,0]**2 + YFluc[:,1]**2)
-                    k += 0.5*(YFluc[:,0]**2 + YFluc[:,1]**2 + YFluc[:,2]**2)
+                    k += 0.5*(YFluc[:,0]**2 + YFluc[:,1]**2)
+                    # k += 0.5*(YFluc[:,0]**2 + YFluc[:,1]**2 + YFluc[:,2]**2)
                 k = k / UBoxTu.shape[1]
                 prepWrite = np.append(k.reshape(-1,1), np.zeros((k.shape[0],2)), axis =1)
                 oFData.writeVtkFromNumpy('Kavg.vtk', [prepWrite], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/'%(oFData.outDir,newRes,timeSample))
@@ -294,11 +296,40 @@ for case in testedCases:
                         oFData.writeChronosSpectra(chronosSymSym, '%s/%s'%(outDir,newRes), timeSample, 'etaSymSymSpct',nModes=nModes)
                         oFData.writeChronosSpectra(chronosSymASym, '%s/%s'%(outDir,newRes), timeSample, 'etaSymASymSpct',nModes=nModes)
                         oFData.writeChronosSpectra(chronosASymSym, '%s/%s'%(outDir,newRes), timeSample, 'etaASymSymSpct',nModes=nModes)
-                        oFData.writeChronosSpectra(chronosASymASym, '%s/%s'%(outDir,newRes), timeSample, 'etaASymASymSpct',nModes=nModes)v
+                        oFData.writeChronosSpectra(chronosASymASym, '%s/%s'%(outDir,newRes), timeSample, 'etaASymASymSpct',nModes=nModes)
                         
             
             # -- merge singular values 
             if mergeSingVals:
+                singValsASymNew = np.append(singValsASym.reshape(-1,1), np.arange(singValsASym.shape[0]).reshape(-1,1),axis=1)
+                singValsASymNew = np.append(singValsASymNew, np.array([1 for i in range(singValsASymNew.shape[0])]).reshape(-1,1),axis=1)
+                
+                # -- prepare symetric singVals
+                singValsSymNew = np.append(singValsSym.reshape(-1,1), np.arange(singValsSym.shape[0]).reshape(-1,1),axis=1)
+                singValsSymNew = np.append(singValsSymNew, np.array([2 for i in range(singValsSymNew.shape[0])]).reshape(-1,1),axis=1)
+                
+                # -- sing values together
+                singValsNew = np.append(singValsASymNew, singValsSymNew, axis=0)
+                
+                singValsNew = singValsNew[singValsNew[:, 0].argsort()][::-1]
+                
+                singValsNew = np.append(singValsNew, (singValsNew[:,0]**2/np.sum(singValsNew[:,0]**2)).reshape(-1,1), axis=1)
+                
+                plt.plot(np.arange(1,singValsNew.shape[0]+1),singValsNew[:,0]**2/np.sum(singValsNew[:,0]**2))
+                plt.yscale('log')
+                plt.xscale('log')
+                plt.xlim((0,1e3))
+                plt.ylim((1e-5,1))
+                # plt.show()
+                np.savetxt('%s/%s/%d/singValsSimHor_%d.dat'%(outDir,newRes,timeSample,timeSample),np.append(np.arange(1,singValsNew.shape[0]+1).reshape(-1,1), singValsNew, axis = 1),header = 'k singVal kSym sym E',comments='')
+            
+            for l in range(10):
+                scF = (chronosASym[l,-400:]-np.min(chronosASym[l,-400:]))/(np.max(chronosASym[l,-400:])-np.min(chronosASym[l,-400:]))
+                fldToWrite = np.append((np.arange(1,scF.shape[0]+1)*0.0005).reshape(-1,1),scF.reshape(-1,1),axis=1)
+                np.savetxt('%s/%s/%d/chronosSpectra/chronosAsym_%d.dat'%(outDir,newRes,timeSample,l+1), fldToWrite, header='k chronos',comments='')
+                scF = (chronosSym[l,-400:]-np.min(chronosSym[l,-400:]))/(np.max(chronosSym[l,-400:])-np.min(chronosSym[l,-400:]))
+                fldToWrite = np.append((np.arange(1,scF.shape[0]+1)*0.0005).reshape(-1,1),scF.reshape(-1,1),axis=1)
+                np.savetxt('%s/%s/%d/chronosSpectra/chronosSym_%d.dat'%(outDir,newRes,timeSample,l+1), fldToWrite, header='k chronos',comments='')
                 
 
             

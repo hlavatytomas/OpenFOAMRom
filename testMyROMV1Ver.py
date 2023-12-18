@@ -10,7 +10,7 @@ testedCases = ['../bCyl_l_3V3']
 timeSamples = np.linspace(3000,10600,3).astype(int)
 timeSamples = np.linspace(3000,12316,3).astype(int)
 # timeSamples = [10600]
-# timeSamples = [12316]
+timeSamples = [12316]
 # timeSamples = [500]
 startTime = 0.9
 # endTime = 1.0
@@ -25,7 +25,7 @@ nameOfTheResultsFolder = 'flowAnalysisPy'
 
 # -- what to do?
 takePODmatricesFromFiles = True
-# takePODmatricesFromFiles = False
+takePODmatricesFromFiles = False
 loadFromNumpyFile = True
 # loadFromNumpyFile = False
 onlyXY = True
@@ -35,14 +35,19 @@ withConv = False
 symFluc = True
 # symFluc = False
 indFromFile = True
-# indFromFile = False
-flipDirs = ['y','z']
+indFromFile = False
+# flipDirs = ['y','z']
+flipDirs = []
+# translate = [0, 0, -0.25]
+translate = [0, 0, 0]
 # flipDirs = []
 prepareK = True
-# prepareK = False
+prepareK = False
 makeSpectraChronos = True
+# makeSpectraChronos = False
 writeModes = False
 writeModes = True
+mergeSingVals = True
 
 # -- writing stuff 
 nModes = 60
@@ -168,10 +173,12 @@ for case in testedCases:
                 if symFluc:
                     print('Calculating symmetric and antisymmetric fluctulations.')
                     if flipDirs == []:
-                        Usym, UAsym = oFData.UsymUAsym(UBoxTu, plochaName = plochaNazev,onlyXY=onlyXY, indFromFile = indFromFile,flipDirs=flipDirs)
+                        Usym, UAsym = oFData.UsymUAsym(UBoxTu, plochaName = plochaNazev,onlyXY=onlyXY, indFromFile = indFromFile,flipDirs=flipDirs,translate=translate)
                         
                         # oFData.writeVtkFromNumpy('flucSym.vtk', [Usym[:,0].reshape(-1,3)], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/testFluc/'%(oFData.outDir,newRes,timeSample))
                         # oFData.writeVtkFromNumpy('flucASym.vtk', [UAsym[:,0].reshape(-1,3)], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/testFluc/'%(oFData.outDir,newRes,timeSample))
+                        
+                        print(Usym, UAsym)
                         
                         # -- symmetric/antisymmetric POD and save results
                         modesSym, singValsSym, chronosSym = oFData.POD(Usym)
@@ -294,7 +301,32 @@ for case in testedCases:
                         oFData.writeChronosSpectra(chronosASymASym, '%s/%s'%(outDir,newRes), timeSample, 'etaASymASymSpct',nModes=nModes)
                     # oFData.phaseDiagrams(chronosASym, '%s/%s'%(outDir,newRes), timeSample, 'etaEtaASymSpct',nModes=nModes)
                     # oFData.phaseDiagrams(chronosSym, '%s/%s'%(outDir,newRes), timeSample, 'etaSymSpct',nModes=nModes)
-            
+
+            # -- merge singular values 
+            if mergeSingVals:
+                print(singValsASym,singValsSym)
+                singValsASymNew = np.append(singValsASym.reshape(-1,1), np.arange(singValsASym.shape[0]).reshape(-1,1),axis=1)
+                singValsASymNew = np.append(singValsASymNew, np.array([1 for i in range(singValsASymNew.shape[0])]).reshape(-1,1),axis=1)
+                
+                # -- prepare symetric singVals
+                singValsSymNew = np.append(singValsSym.reshape(-1,1), np.arange(singValsSym.shape[0]).reshape(-1,1),axis=1)
+                singValsSymNew = np.append(singValsSymNew, np.array([2 for i in range(singValsSymNew.shape[0])]).reshape(-1,1),axis=1)
+                
+                # -- sing values together
+                singValsNew = np.append(singValsASymNew, singValsSymNew, axis=0)
+                
+                singValsNew = singValsNew[singValsNew[:, 0].argsort()][::-1]
+                
+                singValsNew = np.append(singValsNew, (singValsNew[:,0]**2/np.sum(singValsNew[:,0]**2)).reshape(-1,1), axis=1)
+                
+                plt.plot(np.arange(1,singValsNew.shape[0]+1),singValsNew[:,0]**2/np.sum(singValsNew[:,0]**2))
+                plt.yscale('log')
+                plt.xscale('log')
+                plt.xlim((0,1e3))
+                plt.ylim((1e-5,1))
+                # plt.show()
+                np.savetxt('%s/%s/%d/singValsSimVer_%d.dat'%(outDir,newRes,timeSample,timeSample),np.append(np.arange(1,singValsNew.shape[0]+1).reshape(-1,1), singValsNew, axis = 1),header = 'k singVal kSym sym E',comments='')
+                
         # -- convergence of modes and mean values
         # errModes = np.empty((0,modesToComp))
         # refModes = np.load('%s/%s/%d/modes.npy'%(outDir,newRes,timeSamples[-1]))[:,:modesToComp]

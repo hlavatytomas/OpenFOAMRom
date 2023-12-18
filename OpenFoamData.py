@@ -10,6 +10,7 @@ import vtk
 from multiprocessing import Pool
 from scipy import sparse
 from scipy import signal
+import time
 # import pyrennModV3 as prn
 
 # -- custom function
@@ -118,7 +119,7 @@ class OpenFoamData:
 
     # -- function to calculate weighting matrix for flipping the field
     # def loadIndicesForFlipping(self, flip_axis = [1, -1, 1],plochaName = "plochaHor.vtk",flipDir=''):
-    def loadIndicesForFlipping(self, flip_axis = [1, 1, -1],translate = [0, 0, 0],plochaName = "plochaHor.vtk",flipDir=''):
+    def loadIndicesForFlipping(self, flip_axis = [1, -1, 1],translate = [0, 0, 0],plochaName = "plochaHor.vtk",flipDir=''):
         # -- load source field
         reader = vtk.vtkGenericDataObjectReader()
         reader.SetFileName(self.vtkFiles[0])
@@ -170,45 +171,39 @@ class OpenFoamData:
             #     print('Working on cell %d/%d'%(i,nOfCells))
             if isinstance(cell, vtk.vtkTriangle):
                 cellPoints = cell.GetPoints()
-                for j in range(cell.GetNumberOfPoints()):
+                nCellPoints = cell.GetNumberOfPoints()
+                closestPoint = np.zeros((nCellPoints,3))
+                for j in range(nCellPoints):
                     closestPoint[j,:] = cellPoints.GetPoint(j)
-                clPointLst = np.array([locator.FindClosestPoint(closestPoint[i,:]) for i in range(3)])
-                cellsInTarget = np.where(cellsOld == np.array([clPointLst[0]]))[0]
-                for j in range(2):
-                    cellIndTu = np.where(cellsOld == np.array([clPointLst[j+1]]))[0]
-                    cellsInTarget = np.intersect1d(cellIndTu, cellsInTarget)
-                try:
-                    closestPointId = cellsInTarget[0]
-                    if cellsInTarget.size != 1:
-                        print('Cell %d not 1 cells in target %s'%(i,str(cellsInTarget)))
-                    Wf[i,closestPointId] = 1
-                except:
-                    # -- for cells that have points in flipped mesh
-                    # -- I will find all cells that have points of the original mesh near the found points of the flipped mesh and interpolate from these cells 
-                    print('Cell %d not found' % i)
-                    # if np.size(cellIndTu) != 0:
-                        # print('Found inds of point%s'%str(clPointLst))
-                    allCells = np.empty((0)).astype(int)
-                    for j in range(clPointLst.shape[0]):
-                        # allCells = np.append(allCells,np.where(cellsOld == np.array([clPointLst[j+1]]))[0],axis=0)
-                        allCells = np.append(allCells,np.where(cellsOld == np.array([clPointLst[j]]))[0][:],axis=0)
-                    allCells = np.unique(allCells)
-                    # print('Found cells to interpolate from: %s'%str(allCells))
-                    # -- find center of the current cell 
-                    centroidCell = centroidTriangle(closestPoint[0,:], closestPoint[1,:], closestPoint[2,:])
-                    # print('ClosestPoint %s, centroid %s' %(str(closestPoint), str(centroidCell)))
-                    norms = np.zeros((allCells.shape))
-                    for j in range(allCells.shape[0]):
-                        targetCell = target.GetCell(allCells[j]).GetPoints()
-                        targetCellPts = np.array(targetCell.GetPoint(0)), \
-                                        np.array(targetCell.GetPoint(1)), \
-                                        np.array(targetCell.GetPoint(2))
-                        targetCentroid = centroidTriangle(*targetCellPts)
-                        norms[j] = np.linalg.norm(targetCentroid-centroidCell)
-                    norms = norms / np.linalg.norm(norms)
-                    norms = norms / np.sum(norms)
-                    for j in range(allCells.shape[0]): 
-                        Wf[i, allCells[j]] = norms[j]
+                clPointLst = np.array([locator.FindClosestPoint(closestPoint[k,:]) for k in range(nCellPoints)])
+                allCells = np.empty((0)).astype(int)
+                for j in range(clPointLst.shape[0]):
+                    # allCells = np.append(allCells,np.where(cellsOld == np.array([clPointLst[j+1]]))[0],axis=0)
+                    allCells = np.append(allCells,np.where(cellsOld == np.array([clPointLst[j]]))[0],axis=0)
+                allCells = np.unique(allCells)
+                # print('Found cells to interpolate from: %s'%str(allCells))
+                # -- find center of the current cell 
+                centroidCell = centroidGeneral(closestPoint)
+                # print('source centroid', centroidCell)
+                # print('ClosestPoint %s, centroid %s' %(str(closestPoint), str(centroidCell)))
+                norms = np.zeros((allCells.shape))
+                for j in range(allCells.shape[0]):
+                    targetCell = target.GetCell(allCells[j]).GetPoints()
+                    targetCellPts = np.empty((0,3))
+                    # print(targetCell.GetNumberOfPoints())
+                    for k in range(targetCell.GetNumberOfPoints()):
+                        targetCellPts = np.append(targetCellPts, np.array(targetCell.GetPoint(k)).reshape(-1,3),axis=0)
+                    # print(targetCellPts)
+                    targetCentroid = centroidGeneral(targetCellPts)
+                    # print('target centroid cell %d:'%j, targetCentroid)
+                    # targetCentroid = centroidGeneral(*targetCellPts)
+                    norms[j] = min(1./np.linalg.norm(targetCentroid-centroidCell),1e30)
+                # norms = norms / np.linalg.norm(norms)
+                suma = np.sum(norms)
+                if abs(suma) > 1e-15:
+                    norms = norms / suma
+                for j in range(allCells.shape[0]): 
+                    Wf[i, allCells[j]] = norms[j]
             else:
                 print('Cell is not triangle.')
         print('Saving weighting matrix with shape %s'%str(Wf.shape))
@@ -219,14 +214,14 @@ class OpenFoamData:
         return Wf
 
     # -- function to run symmetric and anytisymetric POD
-    def UsymUAsym(self, UBox, plochaName = "plochaHor.vtk",onlyXY=False,indFromFile=False,flipDirs=[]):
+    def UsymUAsym(self, UBox, plochaName = "plochaHor.vtk",onlyXY=False,indFromFile=False,flipDirs=[],translate=[0,0,0]):
         self.loadVTKandTimeLst(plochaName = plochaName)
         if flipDirs == []:
             if indFromFile:
                 Wf = np.load('%s/Wf_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]))
                 print('Loading weighting matrix with shape %s'%str(Wf.shape))
             else:
-                Wf = self.loadIndicesForFlipping(plochaName = plochaName,flipDir='')
+                Wf = self.loadIndicesForFlipping(plochaName = plochaName,flipDir='',translate=translate)
             print('Norm of the weighting matrix %g'%(np.linalg.norm(Wf)))
             sWf = sparse.csr_matrix(Wf)
             USym = np.zeros((UBox.shape))
@@ -458,6 +453,52 @@ class OpenFoamData:
             plt.plot(chron1,chron2)
             plt.savefig('%s/%s/phaseDiagrams/%s_%d.png'%(outDir,str(timeSample),name,(i+1)))
             plt.close()
+    
+    # -- function to create custom vtk box 
+    def createIntVTK(self, targetVTK,startPoint,size,nCells):
+
+        num_cells_x, num_cells_y, num_cells_z = nCells
+        
+        # Calculate the spacing between points
+        spacing_x = size[0] / num_cells_x
+        spacing_y = size[1] / num_cells_y
+        spacing_z = size[2] / num_cells_z
+
+        # Create points
+        points = vtk.vtkPoints()
+        for i in range(num_cells_x + 1):
+            for j in range(num_cells_y + 1):
+                for k in range(num_cells_z + 1):
+                    x = startPoint[0] + i * spacing_x
+                    y = startPoint[1] + j * spacing_y
+                    z = startPoint[2] + k * spacing_z
+                    points.InsertNextPoint(x, y, z)
+
+        # Create hexahedral cells
+        hexahedron = vtk.vtkCellArray()
+        for i in range(num_cells_x):
+            for j in range(num_cells_y):
+                for k in range(num_cells_z):
+                    p1 = i * (num_cells_y + 1) * (num_cells_z + 1) + j * (num_cells_z + 1) + k
+                    p2 = p1 + 1
+                    p3 = p1 + (num_cells_z + 1)
+                    p4 = p3 + 1
+                    p5 = p1 + (num_cells_y + 1) * (num_cells_z + 1)
+                    p6 = p5 + 1
+                    p7 = p5 + (num_cells_z + 1)
+                    p8 = p7 + 1
+                    hexahedron.InsertNextCell(8,[p1, p2, p4, p3, p5, p6, p8, p7])
+
+        # Create unstructured grid
+        unstructuredGrid = vtk.vtkUnstructuredGrid()
+        unstructuredGrid.SetPoints(points)
+        unstructuredGrid.SetCells(vtk.VTK_HEXAHEDRON, hexahedron)
+        
+        writer = vtk.vtkGenericDataObjectWriter()
+        writer.SetFileName(targetVTK)
+        # writer.SetInputData(reader.GetOutput())
+        writer.SetInputData(unstructuredGrid)
+        writer.Write()
             
 
     # -- NOTETH: legacy  --------------------------------------------------------------------------------------------------------------------------

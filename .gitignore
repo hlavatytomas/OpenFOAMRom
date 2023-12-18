@@ -5,3 +5,5 @@ logs*
 testCellsOldVer*
 
 *.vtk
+test*
+out*

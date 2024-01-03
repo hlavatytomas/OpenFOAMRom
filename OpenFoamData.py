@@ -117,6 +117,67 @@ class OpenFoamData:
             self.lenVecsNCells = pickle.load(f)
         print('I have loaded nCells and lenVec vals as %s.'%str(self.lenVecsNCells))
 
+    # -- interpolate from vtk to vtk
+    # -- source and target are vtk library objects
+    def interFromVTKtoVTK(self,source, target):
+        # -- locator in the target mesh 
+        locator = vtk.vtkPointLocator()
+        locator.SetDataSet(source)
+        locator.BuildLocator()
+        
+        # -- cells in target mesh 
+        cellsOld = np.array(source.GetPolys().GetData()).reshape(source.GetNumberOfCells(),-1)[:,1:]
+        
+        # -- find indexes that transform into new one after flipping
+        nOfCellsSource = source.GetNumberOfCells()
+        nOfCellsTarget = target.GetNumberOfCells()
+        Wf = sparse.csr_matrix((nOfCellsTarget,nOfCellsSource))
+        Wf = Wf.tolil()
+        closestPoint = np.empty((3,3))
+        for i in range(nOfCellsTarget):
+            # -- for each cell in source find where it is in new vtk
+            cell = target.GetCell(i)
+            # if i % int(nOfCells/10) == 0:
+            #     print('Working on cell %d/%d'%(i,nOfCells))
+            cellPoints = cell.GetPoints()
+            nCellPoints = cell.GetNumberOfPoints()
+            closestPoint = np.zeros((nCellPoints,3))
+            for j in range(nCellPoints):
+                closestPoint[j,:] = cellPoints.GetPoint(j)
+            clPointLst = np.array([locator.FindClosestPoint(closestPoint[k,:]) for k in range(nCellPoints)])
+            allCells = np.empty((0)).astype(int)
+            for j in range(clPointLst.shape[0]):
+                # allCells = np.append(allCells,np.where(cellsOld == np.array([clPointLst[j+1]]))[0],axis=0)
+                allCells = np.append(allCells,np.where(cellsOld == np.array([clPointLst[j]]))[0],axis=0)
+            allCells = np.unique(allCells)
+            # print('Found cells to interpolate from: %s'%str(allCells))
+            # -- find center of the current cell 
+            centroidCell = centroidGeneral(closestPoint)
+            # print('source centroid', centroidCell)
+            # print('ClosestPoint %s, centroid %s' %(str(closestPoint), str(centroidCell)))
+            norms = np.zeros((allCells.shape))
+            for j in range(allCells.shape[0]):
+                targetCell = source.GetCell(allCells[j]).GetPoints()
+                targetCellPts = np.empty((0,3))
+                # print(targetCell.GetNumberOfPoints())
+                for k in range(targetCell.GetNumberOfPoints()):
+                    targetCellPts = np.append(targetCellPts, np.array(targetCell.GetPoint(k)).reshape(-1,3),axis=0)
+                # print(targetCellPts)
+                targetCentroid = centroidGeneral(targetCellPts)
+                # print('target centroid cell %d:'%j, targetCentroid)
+                # targetCentroid = centroidGeneral(*targetCellPts)
+                norms[j] = min(1./np.linalg.norm(targetCentroid-centroidCell),1e30)
+            # norms = norms / np.linalg.norm(norms)
+            suma = np.sum(norms)
+            if abs(suma) > 1e-15:
+                norms = norms / suma
+            for j in range(allCells.shape[0]): 
+                Wf[i, allCells[j]] = norms[j]
+            Wf = Wf.tocsr()
+            # Wf = Wf.todense()
+        return Wf
+        
+    
     # -- function to calculate weighting matrix for flipping the field
     # def loadIndicesForFlipping(self, flip_axis = [1, -1, 1],plochaName = "plochaHor.vtk",flipDir=''):
     def loadIndicesForFlipping(self, flip_axis = [1, -1, 1],translate = [0, 0, 0],plochaName = "plochaHor.vtk",flipDir=''):
@@ -151,61 +212,8 @@ class OpenFoamData:
         # # writer.SetInputData(reader.GetOutput())
         # writer.SetInputData(target)
         # writer.Write()
-        
-        # -- locator in the target mesh 
-        locator = vtk.vtkPointLocator()
-        locator.SetDataSet(target)
-        locator.BuildLocator()
-        
-        # -- cells in target mesh 
-        cellsOld = np.array(target.GetPolys().GetData()).reshape(target.GetNumberOfCells(),-1)[:,1:]
-        
-        # -- find indexes that transform into new one after flipping
-        nOfCells = source.GetNumberOfCells()
-        Wf = np.zeros((nOfCells,nOfCells))
-        closestPoint = np.empty((3,3))
-        for i in range(nOfCells):
-            # -- for each cell in source find where it is in new vtk
-            cell = source.GetCell(i)
-            # if i % int(nOfCells/10) == 0:
-            #     print('Working on cell %d/%d'%(i,nOfCells))
-            if isinstance(cell, vtk.vtkTriangle):
-                cellPoints = cell.GetPoints()
-                nCellPoints = cell.GetNumberOfPoints()
-                closestPoint = np.zeros((nCellPoints,3))
-                for j in range(nCellPoints):
-                    closestPoint[j,:] = cellPoints.GetPoint(j)
-                clPointLst = np.array([locator.FindClosestPoint(closestPoint[k,:]) for k in range(nCellPoints)])
-                allCells = np.empty((0)).astype(int)
-                for j in range(clPointLst.shape[0]):
-                    # allCells = np.append(allCells,np.where(cellsOld == np.array([clPointLst[j+1]]))[0],axis=0)
-                    allCells = np.append(allCells,np.where(cellsOld == np.array([clPointLst[j]]))[0],axis=0)
-                allCells = np.unique(allCells)
-                # print('Found cells to interpolate from: %s'%str(allCells))
-                # -- find center of the current cell 
-                centroidCell = centroidGeneral(closestPoint)
-                # print('source centroid', centroidCell)
-                # print('ClosestPoint %s, centroid %s' %(str(closestPoint), str(centroidCell)))
-                norms = np.zeros((allCells.shape))
-                for j in range(allCells.shape[0]):
-                    targetCell = target.GetCell(allCells[j]).GetPoints()
-                    targetCellPts = np.empty((0,3))
-                    # print(targetCell.GetNumberOfPoints())
-                    for k in range(targetCell.GetNumberOfPoints()):
-                        targetCellPts = np.append(targetCellPts, np.array(targetCell.GetPoint(k)).reshape(-1,3),axis=0)
-                    # print(targetCellPts)
-                    targetCentroid = centroidGeneral(targetCellPts)
-                    # print('target centroid cell %d:'%j, targetCentroid)
-                    # targetCentroid = centroidGeneral(*targetCellPts)
-                    norms[j] = min(1./np.linalg.norm(targetCentroid-centroidCell),1e30)
-                # norms = norms / np.linalg.norm(norms)
-                suma = np.sum(norms)
-                if abs(suma) > 1e-15:
-                    norms = norms / suma
-                for j in range(allCells.shape[0]): 
-                    Wf[i, allCells[j]] = norms[j]
-            else:
-                print('Cell is not triangle.')
+        Wf = self.interFromVTKtoVTK(source,target)
+
         print('Saving weighting matrix with shape %s'%str(Wf.shape))
         if flipDir == '':
             np.save('%s/Wf_%s_folding.npy' %(self.outDir, plochaName.split('.vtk')[0]),Wf)
@@ -299,7 +307,7 @@ class OpenFoamData:
     
     # -- function to write vtk from numpy fields
     # -- name -- name of the file, fields -- numpy fields to write, template -- template vtk, dest -- directory to store
-    def writeVtkFromNumpy(self,name,fields,template,dest):
+    def writeVtkFromNumpy(self,name,fields,template,dest, insertNew=False):
         reader = vtk.vtkGenericDataObjectReader()
         reader.SetFileName(template)
         reader.Update()
@@ -309,20 +317,32 @@ class OpenFoamData:
 
         data = reader.GetOutput()
         
-        for fieldI in range(len(self.procFields)):
-            # Get the array you want to modify
-            array = data.GetCellData().GetArray(self.procFields[fieldI])
+        if not insertNew:
+            for fieldI in range(len(self.procFields)):
+                # Get the array you want to modify
+                array = data.GetCellData().GetArray(self.procFields[fieldI])
 
-            # Modify the array
-            if array.GetNumberOfComponents() == 1:
-                for i in range(array.GetNumberOfTuples()):
-                    # print(i,fields[fieldI].shape)
-                    array.SetValue(i, fields[fieldI][i])
-            else:
-                for i in range(array.GetNumberOfTuples()):
-                    array.SetTuple(i, fields[fieldI][i])
-                
-                # array.InsertTuple(i, fields[fieldI][i])
+                # Modify the array
+                if array.GetNumberOfComponents() == 1:
+                    for i in range(array.GetNumberOfTuples()):
+                        # print(i,fields[fieldI].shape)
+                        array.SetValue(i, fields[fieldI][i])
+                else:
+                    for i in range(array.GetNumberOfTuples()):
+                        array.SetTuple(i, fields[fieldI][i])
+                    
+                    # array.InsertTuple(i, fields[fieldI][i])
+        else:
+            vector_field = vtk.vtkDoubleArray()
+            vector_field.SetNumberOfComponents(3)  # 3 components for a 3D vector
+            vector_field.SetName("U")
+
+            for i in range(data.GetNumberOfCells()):
+                vector = fields[0][i,:]  # Replace this with your vector data
+                vector_field.InsertNextTuple(vector)
+
+            # Associate the vector field with the unstructured grid
+            data.GetCellData().SetVectors(vector_field)
 
         print('Writing file %s/%s' %(dest,name))
         writer = vtk.vtkGenericDataObjectWriter()
@@ -455,9 +475,48 @@ class OpenFoamData:
             plt.savefig('%s/%s/phaseDiagrams/%s_%d.png'%(outDir,str(timeSample),name,(i+1)))
             plt.close()
     
+    # -- interpolation coefficients matrix
+    def createMatrixForInt(self,sourceVTK, targetVTK):
+        reader = vtk.vtkGenericDataObjectReader()
+        reader.SetFileName(sourceVTK)
+        reader.Update()
+        source = reader.GetOutput()
+        reader = vtk.vtkGenericDataObjectReader()
+        reader.SetFileName(targetVTK)
+        reader.Update()
+        target = reader.GetOutput()
+        Wf = self.interFromVTKtoVTK(source, target)
+        print('Saving vtk ', targetVTK.split('.vtk')[0]+'Wf.npz')
+        sparse.save_npz(targetVTK.split('.vtk')[0]+'Wf.npz',Wf)
+        return Wf
+    
+    def interpolFld(self, onlyXY, Wf, WfFl = [], symFluc=False):
+        UBox = self.Ys[0]
+        print(UBox.shape)
+        if onlyXY:
+            UBoxNew = np.zeros((Wf.shape[0]*2, len(self.vtkFiles)))
+        sWf = sparse.csr_matrix(Wf)
+        if symFluc:
+            sWfFl = sparse.csr_matrix(WfFl)
+            USym = np.zeros((UBoxNew.shape))
+            UASym = np.zeros((UBoxNew.shape))
+        for colI in range(UBox.shape[1]):
+            if colI % 1000 == 0:
+                print('Working on %d/%d col'%(colI,UBox.shape[1]))
+            if onlyXY:
+                UTu = UBox[:,colI].reshape((-1,2))
+                UNew = sWf.dot(UTu)
+                UBoxNew[:,colI] = UNew.reshape(-1)
+                if symFluc:
+                    UFlipped = sWfFl.dot(UTu)
+                    USym[:, colI] = ((UNew + np.array([1,-1]) * UFlipped)/2).reshape(-1)
+                    UASym[:, colI] = ((UNew + np.array([-1,1]) * UFlipped)/2).reshape(-1)
+        self.Ys[0] = UBoxNew
+        if symFluc:
+            return USym, UASym
+    
     # -- function to create custom vtk box 
-    def createIntVTK(self, targetVTK,startPoint,size,nCells):
-
+    def createIntVTK(self, targetVTK,startPoint,size,nCells, symFluc = False):
         num_cells_x, num_cells_y, num_cells_z = nCells
         
         # Calculate the spacing between points
@@ -500,8 +559,27 @@ class OpenFoamData:
         # writer.SetInputData(reader.GetOutput())
         writer.SetInputData(unstructuredGrid)
         writer.Write()
+        
+        if symFluc:
+            flip_axis = [1, -1, 1]
+            translate = [0, 0, 0]
+            flip_filter = vtk.vtkTransformFilter()
+            flip_transform = vtk.vtkTransform()
+            flip_transform.Scale(flip_axis[0], flip_axis[1], flip_axis[2])
+            flip_transform.Translate(translate[0],translate[1],translate[2])
+            flip_filter.SetTransform(flip_transform)
+            flip_filter.SetInputData(unstructuredGrid)
+            flip_filter.Update()
+            target = flip_filter.GetOutput()                
+                    
+            writer = vtk.vtkGenericDataObjectWriter()
+            print('Saving file as ', targetVTK.split('.vtk')[0] + 'Fl.vtk')
+            writer.SetFileName(targetVTK.split('.vtk')[0] + 'Fl.vtk')
+            # writer.SetInputData(reader.GetOutput())
+            writer.SetInputData(target)
+            writer.Write()
             
-
+            
     # -- NOTETH: legacy  --------------------------------------------------------------------------------------------------------------------------
     # --- function to run PO decomposition
     def PODlegacy(self, singValsFile = ''):

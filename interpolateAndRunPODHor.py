@@ -3,19 +3,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from scipy import signal
+from scipy import sparse
 
 # -- information about case
 # testedCases = ['./meshInSt/mS_40p','./meshInSt/mS_50p','./meshInSt/mS_75p','./meshInSt/mS_120p']
 testedCases = ['../bCyl_l_3V3']
 # timeSamples = np.linspace(3000,10600,3).astype(int)
 # timeSamples = np.linspace(3000,12316,3).astype(int)
-# timeSamples = [10600]
-timeSamples = [12316]
-timeSamples = [100]
+timeSamples = [10600]
+timeSamples = [4000,8000,12000]
+# timeSamples = [100]
 # timeSamples = [500]
 startTime = 0.9
 endTime = 1.0
-# endTime = 7.8
+endTime = 7.8
 # endTime = 6.8
 storage = 'PPS'
 procFields = ['U']
@@ -23,24 +24,28 @@ plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0]]
 # plochaNazevLst = ["%s_plochaVer.vtk" % procFields[0]]
 # plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0], "%s_plochaVer.vtk" % procFields[0]]
 nameOfTheResultsFolder = 'flowAnalysisPyIntrpltd'
+nameOfTheResultsFolder = 'flowAnalysisPyIntrpltd2'
+nameOfTheResultsFolder = 'flowAnalysisPyIntrpltd3'
 
 # -- interpolated geom info
 targetVTK = 'intTest.vtk'                                               # name of the interpolated vtk geometry    
-startPoint = [0.0075, -0.0304145, 0.125]
-size = [0.105235-0.0075, 2*0.0304145, 0.125]
+startPoint = [0.007525, -0.0304145, 0.125]
+size = [0.105235-0.007525+0.000842, 2*0.0304145, 0]
 nCells = [59,38,1]
+nCells = [59*2,38*2,1]
+nCells = [59*4,38*4,1]
 
 # -- what to do?
-# takePODmatricesFromFiles = True
+takePODmatricesFromFiles = True
 takePODmatricesFromFiles = False
-# loadFromNumpyFile = True
-loadFromNumpyFile = False
+loadFromNumpyFile = True
+# loadFromNumpyFile = False
 onlyXY = True
 # onlyXY = False
 withConv = True
 withConv = False
 symFluc = True
-# symFluc = False
+symFluc = False
 # indFromFile = True
 indFromFile = False
 # flipDirs = ['y','z']
@@ -48,12 +53,17 @@ flipDirs = []
 prepareK = True
 prepareK = False
 makeSpectraChronos = True
-makeSpectraChronos = False
+# makeSpectraChronos = False
 writeModes = False
-# writeModes = True
+writeModes = True
 # mergeSingVals = True
 mergeSingVals = False
 createIntpltdGeom = True
+createIntpltdGeom = False
+createMatrixForInt = True
+createMatrixForInt = False
+interpolateFld = True
+
 
 # -- writing stuff 
 nModes = 60
@@ -79,7 +89,8 @@ for case in testedCases:
         
         # -- load openFoam data
         oFData = OpenFoamData(caseDir, startTime, endTime, storage, procFields, outDir)
-
+        oFData.loadVTKandTimeLst(plochaName=plochaNazev)
+        
         # -- load data
         if not loadFromNumpyFile:
             oFData.loadYsFromOFData(plochaName = plochaNazev,onlyXY=onlyXY)
@@ -88,8 +99,22 @@ for case in testedCases:
             oFData.loadYsFromNPField()
             
         if createIntpltdGeom:
-            oFData.createIntVTK(outDir + '/' + targetVTK, startPoint,size,nCells)
+            oFData.createIntVTK(outDir + '/' + targetVTK, startPoint,size,nCells,symFluc)
         
+        if createMatrixForInt:
+            Wf = oFData.createMatrixForInt(oFData.vtkFiles[0], outDir + '/' + targetVTK)
+            if symFluc:
+                WfFl = oFData.createMatrixForInt(oFData.vtkFiles[0], outDir + '/' + targetVTK.split('.vtk')[0] + 'Fl.vtk')
+        else:
+            Wf = sparse.load_npz((outDir + '/' + targetVTK).split('.vtk')[0]+'Wf.npz') 
+            if symFluc:
+                WfFl = sparse.load_npz((outDir + '/' + targetVTK).split('.vtk')[0]+'FlWf.npz') 
+            
+        if interpolateFld:
+            if symFluc:
+                USym, UASym = oFData.interpolFld(onlyXY, Wf, WfFl = WfFl, symFluc=symFluc)
+            else:
+                oFData.interpolFld(onlyXY, Wf)
         # -- calculate average of the data
         oFData.calcAvgY()
         
@@ -113,7 +138,8 @@ for case in testedCases:
                 prepWrite = np.append(UBoxTuAvg[:].reshape(-1,2), np.zeros((UBoxTuAvg[:].shape[0]//2,1)), axis =1)
             else:
                 prepWrite = UBoxTuAvg[:].reshape(-1,3)
-            oFData.writeVtkFromNumpy('avg.vtk', [prepWrite], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/'%(oFData.outDir,newRes,timeSample))
+            # oFData.writeVtkFromNumpy('avg.vtk', [prepWrite], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/'%(oFData.outDir,newRes,timeSample))
+            oFData.writeVtkFromNumpy('avg.vtk', [prepWrite], outDir + '/' + targetVTK, '%s/%s/%d/'%(oFData.outDir,newRes,timeSample),insertNew=True)
             
             # -- prepare and save k field
             if prepareK:
@@ -182,14 +208,22 @@ for case in testedCases:
                 if symFluc:
                     print('Calculating symmetric and antisymmetric fluctulations.')
                     if flipDirs == []:
-                        Usym, UAsym = oFData.UsymUAsym(UBoxTu, plochaName = plochaNazev,onlyXY=onlyXY, indFromFile = indFromFile,flipDirs=flipDirs)
+                        # Usym, UAsym = oFData.UsymUAsym(UBoxTu, plochaName = plochaNazev,onlyXY=onlyXY, indFromFile = indFromFile,flipDirs=flipDirs)
                         
                         # oFData.writeVtkFromNumpy('flucSym.vtk', [Usym[:,0].reshape(-1,3)], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/testFluc/'%(oFData.outDir,newRes,timeSample))
                         # oFData.writeVtkFromNumpy('flucASym.vtk', [UAsym[:,0].reshape(-1,3)], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/testFluc/'%(oFData.outDir,newRes,timeSample))
                         
                         # -- symmetric/antisymmetric POD and save results
-                        modesSym, singValsSym, chronosSym = oFData.POD(Usym)
-                        modesASym, singValsASym, chronosASym = oFData.POD(UAsym)
+                        # -- make matrix of fluctulations
+                        
+                        USymTuAvg = np.copy(np.average(USym,axis=1))
+                        UASymTuAvg = np.copy(np.average(UASym,axis=1))
+                        for colInd in range(USym.shape[-1]):
+                            USym[:,colInd] = USym[:,colInd] - USymTuAvg
+                            UASym[:,colInd] = UASym[:,colInd] - UASymTuAvg
+                        
+                        modesSym, singValsSym, chronosSym = oFData.POD(USym)
+                        modesASym, singValsASym, chronosASym = oFData.POD(UASym)
                         np.save('%s/%s/%d/modesSym.npy'%(outDir,newRes,timeSample),modesSym)
                         np.save('%s/%s/%d/singValsSym.npy'%(outDir,newRes,timeSample),singValsSym)
                         np.save('%s/%s/%d/chronosSym.npy'%(outDir,newRes,timeSample),chronosSym)
@@ -281,8 +315,8 @@ for case in testedCases:
                             else:
                                 prepWriteSym = modesSym[:,i].reshape(-1,3)
                                 prepWriteASym = modesASym[:,i].reshape(-1,3)
-                            oFData.writeVtkFromNumpy('mode%dSym.vtk'%(i+1), [prepWriteSym], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
-                            oFData.writeVtkFromNumpy('mode%dASym.vtk'%(i+1), [prepWriteASym], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                            oFData.writeVtkFromNumpy('mode%dSym.vtk'%(i+1), [prepWriteSym], outDir + '/' + targetVTK, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample),insertNew=True)
+                            oFData.writeVtkFromNumpy('mode%dASym.vtk'%(i+1), [prepWriteASym], outDir + '/' + targetVTK, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample),insertNew=True)
                         else:
                             oFData.writeVtkFromNumpy('mode%dSymSym.vtk'%(i+1), [modesSymSym[:,i].reshape(-1,3)], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
                             oFData.writeVtkFromNumpy('mode%dSymASym.vtk'%(i+1), [modesSymASym[:,i].reshape(-1,3)], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
@@ -293,7 +327,7 @@ for case in testedCases:
                             prepWrite = np.append(modes[:,i].reshape(-1,2), np.zeros((modes[:,i].shape[0]//2,1)), axis =1)
                         else:
                             prepWrite = modes[:,i].reshape(-1,3)
-                        oFData.writeVtkFromNumpy('mode%d.vtk'%(i+1), [prepWrite], '%s/postProcessing/sample/3.90006723/%s'%(oFData.caseDir,plochaNazev), '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample))
+                        oFData.writeVtkFromNumpy('mode%d.vtk'%(i+1), [prepWrite], outDir + '/' + targetVTK, '%s/%s/%d/toposes/'%(oFData.outDir,newRes,timeSample), insertNew=True)
 
             # -- chronos spectra 
             if makeSpectraChronos:
@@ -308,6 +342,8 @@ for case in testedCases:
                         oFData.writeChronosSpectra(chronosSymASym, '%s/%s'%(outDir,newRes), timeSample, 'etaSymASymSpct',nModes=nModes)
                         oFData.writeChronosSpectra(chronosASymSym, '%s/%s'%(outDir,newRes), timeSample, 'etaASymSymSpct',nModes=nModes)
                         oFData.writeChronosSpectra(chronosASymASym, '%s/%s'%(outDir,newRes), timeSample, 'etaASymASymSpct',nModes=nModes)
+                else:
+                    oFData.writeChronosSpectra(chronos,'%s/%s'%(outDir,newRes), timeSample, 'eta', nModes=nModes)
                         
             
             # -- merge singular values 
@@ -334,13 +370,13 @@ for case in testedCases:
                 # plt.show()
                 np.savetxt('%s/%s/%d/singValsSimHor_%d.dat'%(outDir,newRes,timeSample,timeSample),np.append(np.arange(1,singValsNew.shape[0]+1).reshape(-1,1), singValsNew, axis = 1),header = 'k singVal kSym sym E',comments='')
             
-            for l in range(10):
-                scF = (chronosASym[l,-400:]-np.min(chronosASym[l,-400:]))/(np.max(chronosASym[l,-400:])-np.min(chronosASym[l,-400:]))
-                fldToWrite = np.append((np.arange(1,scF.shape[0]+1)*0.0005).reshape(-1,1),scF.reshape(-1,1),axis=1)
-                np.savetxt('%s/%s/%d/chronosSpectra/chronosAsym_%d.dat'%(outDir,newRes,timeSample,l+1), fldToWrite, header='k chronos',comments='')
-                scF = (chronosSym[l,-400:]-np.min(chronosSym[l,-400:]))/(np.max(chronosSym[l,-400:])-np.min(chronosSym[l,-400:]))
-                fldToWrite = np.append((np.arange(1,scF.shape[0]+1)*0.0005).reshape(-1,1),scF.reshape(-1,1),axis=1)
-                np.savetxt('%s/%s/%d/chronosSpectra/chronosSym_%d.dat'%(outDir,newRes,timeSample,l+1), fldToWrite, header='k chronos',comments='')
+            # for l in range(10):
+            #     scF = (chronosASym[l,-400:]-np.min(chronosASym[l,-400:]))/(np.max(chronosASym[l,-400:])-np.min(chronosASym[l,-400:]))
+            #     fldToWrite = np.append((np.arange(1,scF.shape[0]+1)*0.0005).reshape(-1,1),scF.reshape(-1,1),axis=1)
+            #     np.savetxt('%s/%s/%d/chronosSpectra/chronosAsym_%d.dat'%(outDir,newRes,timeSample,l+1), fldToWrite, header='k chronos',comments='')
+            #     scF = (chronosSym[l,-400:]-np.min(chronosSym[l,-400:]))/(np.max(chronosSym[l,-400:])-np.min(chronosSym[l,-400:]))
+            #     fldToWrite = np.append((np.arange(1,scF.shape[0]+1)*0.0005).reshape(-1,1),scF.reshape(-1,1),axis=1)
+            #     np.savetxt('%s/%s/%d/chronosSpectra/chronosSym_%d.dat'%(outDir,newRes,timeSample,l+1), fldToWrite, header='k chronos',comments='')
                 
 
             

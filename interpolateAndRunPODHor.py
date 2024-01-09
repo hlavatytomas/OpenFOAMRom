@@ -10,8 +10,10 @@ from scipy import sparse
 testedCases = ['../bCyl_l_3V3']
 # timeSamples = np.linspace(3000,10600,3).astype(int)
 # timeSamples = np.linspace(3000,12316,3).astype(int)
-timeSamples = [10600]
-timeSamples = [4000,8000,12000]
+# timeSamples = [10600]
+# timeSamples = [2000,3000,4000,5000,6000,7000,8000,9000,10000,11000,12000]
+timeSamples = [12000]
+# timeSamples = [2000]
 # timeSamples = [100]
 # timeSamples = [500]
 startTime = 0.9
@@ -23,6 +25,7 @@ procFields = ['U']
 plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0]]
 # plochaNazevLst = ["%s_plochaVer.vtk" % procFields[0]]
 # plochaNazevLst = ["%s_plochaHor3.vtk" % procFields[0], "%s_plochaVer.vtk" % procFields[0]]
+# nameOfTheResultsFolder = 'flowAnalysisPyIntrpltd05'
 nameOfTheResultsFolder = 'flowAnalysisPyIntrpltd'
 nameOfTheResultsFolder = 'flowAnalysisPyIntrpltd2'
 nameOfTheResultsFolder = 'flowAnalysisPyIntrpltd3'
@@ -31,13 +34,14 @@ nameOfTheResultsFolder = 'flowAnalysisPyIntrpltd3'
 targetVTK = 'intTest.vtk'                                               # name of the interpolated vtk geometry    
 startPoint = [0.007525, -0.0304145, 0.125]
 size = [0.105235-0.007525+0.000842, 2*0.0304145, 0]
+# nCells = [2*59//3,2*38//3,1]
 nCells = [59,38,1]
 nCells = [59*2,38*2,1]
 nCells = [59*4,38*4,1]
 
 # -- what to do?
 takePODmatricesFromFiles = True
-takePODmatricesFromFiles = False
+# takePODmatricesFromFiles = False
 loadFromNumpyFile = True
 # loadFromNumpyFile = False
 onlyXY = True
@@ -45,19 +49,19 @@ onlyXY = True
 withConv = True
 withConv = False
 symFluc = True
-symFluc = False
+# symFluc = False
 # indFromFile = True
 indFromFile = False
 # flipDirs = ['y','z']
 flipDirs = []
 prepareK = True
 prepareK = False
-makeSpectraChronos = True
-# makeSpectraChronos = False
+# makeSpectraChronos = True
+makeSpectraChronos = False
 writeModes = False
-writeModes = True
-# mergeSingVals = True
-mergeSingVals = False
+# writeModes = True
+mergeSingVals = True
+# mergeSingVals = False
 createIntpltdGeom = True
 createIntpltdGeom = False
 createMatrixForInt = True
@@ -132,6 +136,13 @@ for case in testedCases:
             UBoxTu = np.copy(UBox[:,:timeSample])
             UBoxTuAvg = np.copy(np.average(UBoxTu,axis=1))
             errorInAvg[i] = np.linalg.norm(UBoxTuAvg-oFData.avgs[0])
+            
+            # -- calculate average matrices in this time
+            if symFluc:
+                USymTu = np.copy(USym[:,:timeSample])
+                UASymTu = np.copy(UASym[:,:timeSample])
+                USymTuAvg = np.copy(np.average(USymTu,axis=1))
+                UASymTuAvg = np.copy(np.average(UASymTu,axis=1))
             
             # -- write avg field into vtk:
             if onlyXY:
@@ -216,14 +227,14 @@ for case in testedCases:
                         # -- symmetric/antisymmetric POD and save results
                         # -- make matrix of fluctulations
                         
-                        USymTuAvg = np.copy(np.average(USym,axis=1))
-                        UASymTuAvg = np.copy(np.average(UASym,axis=1))
-                        for colInd in range(USym.shape[-1]):
-                            USym[:,colInd] = USym[:,colInd] - USymTuAvg
-                            UASym[:,colInd] = UASym[:,colInd] - UASymTuAvg
+                        # USymTuAvg = np.copy(np.average(USym,axis=1))
+                        # UASymTuAvg = np.copy(np.average(UASym,axis=1))
+                        for colInd in range(USymTu.shape[-1]):
+                            USymTu[:,colInd] = USymTu[:,colInd] - USymTuAvg
+                            UASymTu[:,colInd] = UASymTu[:,colInd] - UASymTuAvg
                         
-                        modesSym, singValsSym, chronosSym = oFData.POD(USym)
-                        modesASym, singValsASym, chronosASym = oFData.POD(UASym)
+                        modesSym, singValsSym, chronosSym = oFData.POD(USymTu)
+                        modesASym, singValsASym, chronosASym = oFData.POD(UASymTu)
                         np.save('%s/%s/%d/modesSym.npy'%(outDir,newRes,timeSample),modesSym)
                         np.save('%s/%s/%d/singValsSym.npy'%(outDir,newRes,timeSample),singValsSym)
                         np.save('%s/%s/%d/chronosSym.npy'%(outDir,newRes,timeSample),chronosSym)

@@ -7,3 +7,4 @@ testCellsOldVer*
 *.vtk
 test*
 out*
+Wf.npy

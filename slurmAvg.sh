@@ -21,5 +21,5 @@
 # python3 -u testMyROMV1.py > logs/log.hor230828
 # python3 -u testMyROMV1.py > logs/log.ver230828
 # python3 -u testMyROMV1.py > logs/log.hor231027
-python3 -u testMyROMV1Ver.py > logs/log.verPOD231108
+python3 -u interpolateAndRunPODHor.py > logs/log.interpol3V3
 # python3 -u testMyROMV1.py > log.avgTopVer
